@@ -1,0 +1,190 @@
+package net.conczin.immersive_worldmap.database;
+
+import net.conczin.immersive_worldmap.util.CompressionUtil;
+
+import java.nio.file.Path;
+import java.sql.*;
+
+/**
+ * SQLite database manager for storing chunk LOD data.
+ * Maintains an SQLite database of (x, y, z, dimension, lod, colors) for each chunk.
+ */
+public class ChunkLodDatabase implements AutoCloseable {
+    private final Connection connection;
+
+    /**
+     * Creates or opens an existing SQLite database.
+     *
+     * @param databasePath the path to the SQLite database file
+     */
+    public ChunkLodDatabase(Path databasePath) {
+        try {
+            Class.forName("org.sqlite.JDBC");
+        } catch (ClassNotFoundException e) {
+            throw new RuntimeException("SQLite JDBC driver not found", e);
+        }
+        try {
+            String url = "jdbc:sqlite:" + databasePath.toAbsolutePath();
+            this.connection = DriverManager.getConnection(url);
+            initializeSchema();
+        } catch (SQLException e) {
+            throw new RuntimeException("Failed to initialize database at " + databasePath, e);
+        }
+    }
+
+    /**
+     * Initializes the database schema if it doesn't exist.
+     *
+     * @throws SQLException if a database access error occurs
+     */
+    private void initializeSchema() throws SQLException {
+        try (Statement stmt = connection.createStatement()) {
+            stmt.execute("""
+                    CREATE TABLE IF NOT EXISTS chunk_lod (
+                        x INTEGER NOT NULL,
+                        z INTEGER NOT NULL,
+                        dimension TEXT NOT NULL,
+                        lod INTEGER NOT NULL,
+                        colors BLOB NOT NULL,
+                        PRIMARY KEY (x, z, dimension, lod)
+                    )
+                    """);
+
+            // Create an index for faster lookups by dimension and LOD
+            stmt.execute("""
+                    CREATE INDEX IF NOT EXISTS idx_dimension_lod
+                    ON chunk_lod(dimension, lod)
+                    """);
+
+            // Create an index for spatial queries
+            stmt.execute("""
+                    CREATE INDEX IF NOT EXISTS idx_spatial
+                    ON chunk_lod(x, z)
+                    """);
+        }
+    }
+
+    /**
+     * Inserts or updates a chunk LOD record.
+     *
+     * @param x         the x coordinate
+     * @param z         the z coordinate
+     * @param dimension the dimension identifier
+     * @param lod       the level of detail
+     * @param colors    the binary color data
+     * @throws SQLException if a database access error occurs
+     */
+    public void upsertChunk(int x, int z, String dimension, int lod, byte[] colors) throws SQLException {
+        String sql = """
+                INSERT INTO chunk_lod (x, z, dimension, lod, colors)
+                VALUES (?, ?, ?, ?, ?)
+                ON CONFLICT(x, z, dimension, lod) DO UPDATE SET colors = excluded.colors
+                """;
+
+        byte[] compressed = CompressionUtil.compress(colors);
+
+        try (PreparedStatement pstmt = connection.prepareStatement(sql)) {
+            pstmt.setInt(1, x);
+            pstmt.setInt(2, z);
+            pstmt.setString(3, dimension);
+            pstmt.setInt(4, lod);
+            pstmt.setBytes(5, compressed);
+            pstmt.executeUpdate();
+        }
+    }
+
+    /**
+     * Retrieves the color data for a specific chunk.
+     *
+     * @param x         the x coordinate
+     * @param z         the z coordinate
+     * @param dimension the dimension identifier
+     * @param lod       the level of detail
+     * @return the color data as a byte array, or null if not found
+     * @throws SQLException if a database access error occurs
+     */
+    public byte[] getChunkColors(int x, int z, String dimension, int lod) throws SQLException {
+        String sql = "SELECT colors FROM chunk_lod WHERE x = ? AND z = ? AND dimension = ? AND lod = ?";
+
+        try (PreparedStatement pstmt = connection.prepareStatement(sql)) {
+            pstmt.setInt(1, x);
+            pstmt.setInt(2, z);
+            pstmt.setString(3, dimension);
+            pstmt.setInt(4, lod);
+
+            try (ResultSet rs = pstmt.executeQuery()) {
+                if (rs.next()) {
+                    byte[] compressed = rs.getBytes("colors");
+                    return CompressionUtil.decompress(compressed);
+                }
+            }
+        }
+        return null;
+    }
+
+    /**
+     * Deletes a chunk LOD record.
+     *
+     * @param x         the x coordinate
+     * @param z         the z coordinate
+     * @param dimension the dimension identifier
+     * @param lod       the level of detail
+     * @throws SQLException if a database access error occurs
+     */
+    public void deleteChunk(int x, int z, String dimension, int lod) throws SQLException {
+        String sql = "DELETE FROM chunk_lod WHERE x = ? AND z = ? AND dimension = ? AND lod = ?";
+
+        try (PreparedStatement pstmt = connection.prepareStatement(sql)) {
+            pstmt.setInt(1, x);
+            pstmt.setInt(2, z);
+            pstmt.setString(3, dimension);
+            pstmt.setInt(4, lod);
+            pstmt.executeUpdate();
+        }
+    }
+
+    /**
+     * Clears all chunks for a specific dimension.
+     *
+     * @param dimension the dimension identifier
+     * @throws SQLException if a database access error occurs
+     */
+    public void clearDimension(String dimension) throws SQLException {
+        String sql = "DELETE FROM chunk_lod WHERE dimension = ?";
+
+        try (PreparedStatement pstmt = connection.prepareStatement(sql)) {
+            pstmt.setString(1, dimension);
+            pstmt.executeUpdate();
+        }
+    }
+
+    /**
+     * Gets the row count of the chunk_lod table.
+     *
+     * @return the number of records in the table
+     * @throws SQLException if a database access error occurs
+     */
+    public long getRecordCount() throws SQLException {
+        try (Statement stmt = connection.createStatement();
+             ResultSet rs = stmt.executeQuery("SELECT COUNT(*) as count FROM chunk_lod")) {
+            if (rs.next()) {
+                return rs.getLong("count");
+            }
+        }
+        return 0;
+    }
+
+    /**
+     * Closes the database connection.
+     */
+    @Override
+    public void close() {
+        try {
+            if (connection != null && !connection.isClosed()) {
+                connection.close();
+            }
+        } catch (SQLException e) {
+            throw new RuntimeException("Failed to close database connection", e);
+        }
+    }
+}
