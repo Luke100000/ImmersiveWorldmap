@@ -1,6 +1,6 @@
 package net.conczin.immersive_worldmap;
 
-import net.conczin.immersive_worldmap.client.LodViewerScreen;
+import net.conczin.immersive_worldmap.screen.LodViewerScreen;
 import net.minecraft.client.Minecraft;
 import net.minecraft.client.multiplayer.ClientLevel;
 import net.neoforged.api.distmarker.Dist;

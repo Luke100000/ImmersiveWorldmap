@@ -1,5 +1,6 @@
 package net.conczin.immersive_worldmap.lod;
 
+import net.conczin.immersive_worldmap.ImmersiveWorldmap;
 import net.conczin.immersive_worldmap.database.DatabaseManager;
 import net.minecraft.world.level.chunk.LevelChunk;
 import net.minecraft.world.level.chunk.LevelChunkSection;
@@ -7,18 +8,11 @@ import net.minecraft.world.level.chunk.LevelChunkSection;
 import java.sql.SQLException;
 
 /**
- * Processes chunks and generates LOD data for storage in the database.
+ * Processes chunks and generates LODs.
  */
 public class ChunkLodProcessor {
-
-    /**
-     * Processes a chunk and stores its LOD data in the database.
-     * For each block: air = 0, non-air = 1.
-     *
-     * @param chunk the chunk to process
-     */
     public static void processChunk(LevelChunk chunk) {
-        if (chunk == null || !DatabaseManager.isInitialized()) {
+        if (!DatabaseManager.isInitialized()) {
             return;
         }
 
@@ -32,39 +26,28 @@ public class ChunkLodProcessor {
 
         // Process all blocks in the chunk column
         LevelChunkSection[] sections = chunk.getSections();
-        for (int x = 0; x < 16; x++) {
-            for (int y = 0; y < height; y++) {
-                for (int z = 0; z < 16; z++) {
-                    // Determine which section this block is in
-                    int sectionIndex = (y >> 4) + (chunk.getMinBuildHeight() >> 4);
+        for (int sectionIndex = 0; sectionIndex < sections.length; sectionIndex++) {
+            LevelChunkSection section = sections[sectionIndex];
+            if (section.hasOnlyAir()) {
+                continue;
+            }
 
-                    boolean isAir = true;
-                    if (sectionIndex >= 0 && sectionIndex < sections.length) {
-                        LevelChunkSection section = sections[sectionIndex];
-                        if (section != null && !section.hasOnlyAir()) {
-                            int localY = y & 15;
-                            isAir = section.getBlockState(x, localY, z).isAir();
-                        }
+            for (int x = 0; x < 16; x++) {
+                for (int y = 0; y < 16; y++) {
+                    for (int z = 0; z < 16; z++) {
+                        int color = section.getBlockState(x, y, z).getBlock().defaultMapColor().id;
+                        int ay = (sectionIndex * 16) + y;
+                        int blockIndex = (x * height * 16) + (ay * 16) + z;
+                        chunkData[blockIndex] = (byte) color;
                     }
-
-                    // Calculate block index in the full column
-                    int blockIndex = (x * height * 16) + (y * 16) + z;
-                    chunkData[blockIndex] = isAir ? (byte) 0 : (byte) 1;
                 }
             }
         }
 
-        // Store in database
         try {
-            DatabaseManager.getInstance().upsertChunk(
-                    chunkX,
-                    chunkZ,
-                    dimension,
-                    0, // LOD level 0 (highest detail)
-                    chunkData
-            );
+            DatabaseManager.getInstance().upsertChunk(chunkX, chunkZ, dimension, 0, chunkData);
         } catch (SQLException e) {
-            System.err.println("Failed to store chunk LOD data: " + e.getMessage());
+            ImmersiveWorldmap.LOGGER.warn("Failed to store chunk LOD data: {}", e.getMessage());
         }
     }
 
@@ -85,7 +68,7 @@ public class ChunkLodProcessor {
         try {
             return DatabaseManager.getInstance().getChunkColors(chunkX, chunkZ, dimension, lod);
         } catch (SQLException e) {
-            System.err.println("Failed to retrieve chunk LOD data: " + e.getMessage());
+            ImmersiveWorldmap.LOGGER.warn("Failed to retrieve chunk LOD data: {}", e.getMessage());
         }
 
         return null;

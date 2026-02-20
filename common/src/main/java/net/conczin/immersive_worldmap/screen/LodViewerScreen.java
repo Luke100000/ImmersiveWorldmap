@@ -1,4 +1,4 @@
-package net.conczin.immersive_worldmap.client;
+package net.conczin.immersive_worldmap.screen;
 
 import com.mojang.blaze3d.systems.RenderSystem;
 import com.mojang.blaze3d.vertex.MeshData;

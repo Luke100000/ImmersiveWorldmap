@@ -5,6 +5,7 @@ import com.mojang.blaze3d.vertex.DefaultVertexFormat;
 import com.mojang.blaze3d.vertex.MeshData;
 import com.mojang.blaze3d.vertex.Tesselator;
 import com.mojang.blaze3d.vertex.VertexFormat;
+import net.conczin.immersive_worldmap.util.ColorManager;
 
 /**
  * Renders LOD chunk data as a mesh.
@@ -27,24 +28,44 @@ public class LodChunkRenderer {
         float offsetZ = lodData.chunkZ() * 16.0F;
         int height = lodData.getHeight();
 
-        // Simple color for now - gray for non-air blocks
-        float r = 0.7F;
-        float g = 0.7F;
-        float b = 0.7F;
-        float a = 1.0F;
-
         // Different shading for each face direction
         float topBrightness = 1.0F;
         float bottomBrightness = 0.5F;
         float sideBrightness = 0.8F;
+        float sideEWBrightness = 0.72F; // 0.8 * 0.9
 
         // Iterate through all blocks and render visible faces
         for (int x = 0; x < 16; x++) {
             for (int y = 0; y < height; y++) {
                 for (int z = 0; z < 16; z++) {
-                    if (lodData.isAir(x, y, z)) {
-                        continue; // Skip air blocks
+                    byte blockColorId = lodData.getBlock(x, y, z);
+                    if (blockColorId == 0) {
+                        continue; // Skip air blocks (MapColor.NONE has id 0)
                     }
+
+                    // Get RGBA color from ColorManager
+                    int[] color = ColorManager.byteToRGBA(blockColorId);
+                    int r = color[0];
+                    int g = color[1];
+                    int b = color[2];
+                    int a = color[3];
+
+                    // Pre-calculate brightness-adjusted colors for each face direction
+                    int rTop = (int)(r * topBrightness);
+                    int gTop = (int)(g * topBrightness);
+                    int bTop = (int)(b * topBrightness);
+
+                    int rBottom = (int)(r * bottomBrightness);
+                    int gBottom = (int)(g * bottomBrightness);
+                    int bBottom = (int)(b * bottomBrightness);
+
+                    int rSide = (int)(r * sideBrightness);
+                    int gSide = (int)(g * sideBrightness);
+                    int bSide = (int)(b * sideBrightness);
+
+                    int rSideEW = (int)(r * sideEWBrightness);
+                    int gSideEW = (int)(g * sideEWBrightness);
+                    int bSideEW = (int)(b * sideEWBrightness);
 
                     float x0 = x;
                     float y0 = y;
@@ -55,50 +76,50 @@ public class LodChunkRenderer {
 
                     // Top face (Y+)
                     if (y == height - 1 || lodData.isAir(x, y + 1, z)) {
-                        builder.addVertex(x0, y1, z1).setColor(r * topBrightness, g * topBrightness, b * topBrightness, a).setNormal(0.0F, 1.0F, 0.0F);
-                        builder.addVertex(x1, y1, z1).setColor(r * topBrightness, g * topBrightness, b * topBrightness, a).setNormal(0.0F, 1.0F, 0.0F);
-                        builder.addVertex(x1, y1, z0).setColor(r * topBrightness, g * topBrightness, b * topBrightness, a).setNormal(0.0F, 1.0F, 0.0F);
-                        builder.addVertex(x0, y1, z0).setColor(r * topBrightness, g * topBrightness, b * topBrightness, a).setNormal(0.0F, 1.0F, 0.0F);
+                        builder.addVertex(x0, y1, z1).setColor(rTop, gTop, bTop, a).setNormal(0.0F, 1.0F, 0.0F);
+                        builder.addVertex(x1, y1, z1).setColor(rTop, gTop, bTop, a).setNormal(0.0F, 1.0F, 0.0F);
+                        builder.addVertex(x1, y1, z0).setColor(rTop, gTop, bTop, a).setNormal(0.0F, 1.0F, 0.0F);
+                        builder.addVertex(x0, y1, z0).setColor(rTop, gTop, bTop, a).setNormal(0.0F, 1.0F, 0.0F);
                     }
 
                     // Bottom face (Y-)
                     if (y == 0 || lodData.isAir(x, y - 1, z)) {
-                        builder.addVertex(x0, y0, z0).setColor(r * bottomBrightness, g * bottomBrightness, b * bottomBrightness, a).setNormal(0.0F, -1.0F, 0.0F);
-                        builder.addVertex(x1, y0, z0).setColor(r * bottomBrightness, g * bottomBrightness, b * bottomBrightness, a).setNormal(0.0F, -1.0F, 0.0F);
-                        builder.addVertex(x1, y0, z1).setColor(r * bottomBrightness, g * bottomBrightness, b * bottomBrightness, a).setNormal(0.0F, -1.0F, 0.0F);
-                        builder.addVertex(x0, y0, z1).setColor(r * bottomBrightness, g * bottomBrightness, b * bottomBrightness, a).setNormal(0.0F, -1.0F, 0.0F);
+                        builder.addVertex(x0, y0, z0).setColor(rBottom, gBottom, bBottom, a).setNormal(0.0F, -1.0F, 0.0F);
+                        builder.addVertex(x1, y0, z0).setColor(rBottom, gBottom, bBottom, a).setNormal(0.0F, -1.0F, 0.0F);
+                        builder.addVertex(x1, y0, z1).setColor(rBottom, gBottom, bBottom, a).setNormal(0.0F, -1.0F, 0.0F);
+                        builder.addVertex(x0, y0, z1).setColor(rBottom, gBottom, bBottom, a).setNormal(0.0F, -1.0F, 0.0F);
                     }
 
                     // North face (Z-)
                     if (z == 0 || lodData.isAir(x, y, z - 1)) {
-                        builder.addVertex(x0, y1, z0).setColor(r * sideBrightness, g * sideBrightness, b * sideBrightness, a).setNormal(0.0F, 0.0F, -1.0F);
-                        builder.addVertex(x1, y1, z0).setColor(r * sideBrightness, g * sideBrightness, b * sideBrightness, a).setNormal(0.0F, 0.0F, -1.0F);
-                        builder.addVertex(x1, y0, z0).setColor(r * sideBrightness, g * sideBrightness, b * sideBrightness, a).setNormal(0.0F, 0.0F, -1.0F);
-                        builder.addVertex(x0, y0, z0).setColor(r * sideBrightness, g * sideBrightness, b * sideBrightness, a).setNormal(0.0F, 0.0F, -1.0F);
+                        builder.addVertex(x0, y1, z0).setColor(rSide, gSide, bSide, a).setNormal(0.0F, 0.0F, -1.0F);
+                        builder.addVertex(x1, y1, z0).setColor(rSide, gSide, bSide, a).setNormal(0.0F, 0.0F, -1.0F);
+                        builder.addVertex(x1, y0, z0).setColor(rSide, gSide, bSide, a).setNormal(0.0F, 0.0F, -1.0F);
+                        builder.addVertex(x0, y0, z0).setColor(rSide, gSide, bSide, a).setNormal(0.0F, 0.0F, -1.0F);
                     }
 
                     // South face (Z+)
                     if (z == 15 || lodData.isAir(x, y, z + 1)) {
-                        builder.addVertex(x0, y0, z1).setColor(r * sideBrightness, g * sideBrightness, b * sideBrightness, a).setNormal(0.0F, 0.0F, 1.0F);
-                        builder.addVertex(x1, y0, z1).setColor(r * sideBrightness, g * sideBrightness, b * sideBrightness, a).setNormal(0.0F, 0.0F, 1.0F);
-                        builder.addVertex(x1, y1, z1).setColor(r * sideBrightness, g * sideBrightness, b * sideBrightness, a).setNormal(0.0F, 0.0F, 1.0F);
-                        builder.addVertex(x0, y1, z1).setColor(r * sideBrightness, g * sideBrightness, b * sideBrightness, a).setNormal(0.0F, 0.0F, 1.0F);
+                        builder.addVertex(x0, y0, z1).setColor(rSide, gSide, bSide, a).setNormal(0.0F, 0.0F, 1.0F);
+                        builder.addVertex(x1, y0, z1).setColor(rSide, gSide, bSide, a).setNormal(0.0F, 0.0F, 1.0F);
+                        builder.addVertex(x1, y1, z1).setColor(rSide, gSide, bSide, a).setNormal(0.0F, 0.0F, 1.0F);
+                        builder.addVertex(x0, y1, z1).setColor(rSide, gSide, bSide, a).setNormal(0.0F, 0.0F, 1.0F);
                     }
 
                     // West face (X-)
                     if (x == 0 || lodData.isAir(x - 1, y, z)) {
-                        builder.addVertex(x0, y0, z0).setColor(r * sideBrightness * 0.9F, g * sideBrightness * 0.9F, b * sideBrightness * 0.9F, a).setNormal(-1.0F, 0.0F, 0.0F);
-                        builder.addVertex(x0, y0, z1).setColor(r * sideBrightness * 0.9F, g * sideBrightness * 0.9F, b * sideBrightness * 0.9F, a).setNormal(-1.0F, 0.0F, 0.0F);
-                        builder.addVertex(x0, y1, z1).setColor(r * sideBrightness * 0.9F, g * sideBrightness * 0.9F, b * sideBrightness * 0.9F, a).setNormal(-1.0F, 0.0F, 0.0F);
-                        builder.addVertex(x0, y1, z0).setColor(r * sideBrightness * 0.9F, g * sideBrightness * 0.9F, b * sideBrightness * 0.9F, a).setNormal(-1.0F, 0.0F, 0.0F);
+                        builder.addVertex(x0, y0, z0).setColor(rSideEW, gSideEW, bSideEW, a).setNormal(-1.0F, 0.0F, 0.0F);
+                        builder.addVertex(x0, y0, z1).setColor(rSideEW, gSideEW, bSideEW, a).setNormal(-1.0F, 0.0F, 0.0F);
+                        builder.addVertex(x0, y1, z1).setColor(rSideEW, gSideEW, bSideEW, a).setNormal(-1.0F, 0.0F, 0.0F);
+                        builder.addVertex(x0, y1, z0).setColor(rSideEW, gSideEW, bSideEW, a).setNormal(-1.0F, 0.0F, 0.0F);
                     }
 
                     // East face (X+)
                     if (x == 15 || lodData.isAir(x + 1, y, z)) {
-                        builder.addVertex(x1, y1, z0).setColor(r * sideBrightness * 0.9F, g * sideBrightness * 0.9F, b * sideBrightness * 0.9F, a).setNormal(1.0F, 0.0F, 0.0F);
-                        builder.addVertex(x1, y1, z1).setColor(r * sideBrightness * 0.9F, g * sideBrightness * 0.9F, b * sideBrightness * 0.9F, a).setNormal(1.0F, 0.0F, 0.0F);
-                        builder.addVertex(x1, y0, z1).setColor(r * sideBrightness * 0.9F, g * sideBrightness * 0.9F, b * sideBrightness * 0.9F, a).setNormal(1.0F, 0.0F, 0.0F);
-                        builder.addVertex(x1, y0, z0).setColor(r * sideBrightness * 0.9F, g * sideBrightness * 0.9F, b * sideBrightness * 0.9F, a).setNormal(1.0F, 0.0F, 0.0F);
+                        builder.addVertex(x1, y1, z0).setColor(rSideEW, gSideEW, bSideEW, a).setNormal(1.0F, 0.0F, 0.0F);
+                        builder.addVertex(x1, y1, z1).setColor(rSideEW, gSideEW, bSideEW, a).setNormal(1.0F, 0.0F, 0.0F);
+                        builder.addVertex(x1, y0, z1).setColor(rSideEW, gSideEW, bSideEW, a).setNormal(1.0F, 0.0F, 0.0F);
+                        builder.addVertex(x1, y0, z0).setColor(rSideEW, gSideEW, bSideEW, a).setNormal(1.0F, 0.0F, 0.0F);
                     }
                 }
             }
