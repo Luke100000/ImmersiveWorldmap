@@ -2,16 +2,28 @@ package net.conczin.immersive_worldmap.lod;
 
 import net.conczin.immersive_worldmap.ImmersiveWorldmap;
 import net.conczin.immersive_worldmap.database.DatabaseManager;
+import net.conczin.immersive_worldmap.util.ThreadPoolUtil;
 import net.minecraft.world.level.chunk.LevelChunk;
 import net.minecraft.world.level.chunk.LevelChunkSection;
 
 import java.sql.SQLException;
+import java.util.concurrent.ExecutorService;
 
 /**
  * Processes chunks and generates LODs.
  */
 public class ChunkLodProcessor {
+    public static final ExecutorService EXECUTOR = ThreadPoolUtil.createLowPriorityFixedThreadPool("ImmersiveWorldmap");
+
+    public static void shutdown() {
+        EXECUTOR.shutdownNow();
+    }
+
     public static void processChunk(LevelChunk chunk) {
+        EXECUTOR.submit(() -> processChunkSync(chunk));
+    }
+
+    private static void processChunkSync(LevelChunk chunk) {
         if (!DatabaseManager.isInitialized()) {
             return;
         }
@@ -91,5 +103,3 @@ public class ChunkLodProcessor {
         return null;
     }
 }
-
-

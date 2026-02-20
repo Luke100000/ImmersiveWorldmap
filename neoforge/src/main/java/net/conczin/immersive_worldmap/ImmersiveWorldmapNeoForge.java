@@ -8,6 +8,7 @@ import net.neoforged.bus.api.SubscribeEvent;
 import net.neoforged.fml.common.EventBusSubscriber;
 import net.neoforged.fml.common.Mod;
 import net.neoforged.neoforge.client.event.ClientTickEvent;
+import net.neoforged.neoforge.event.level.LevelEvent;
 import net.neoforged.neoforge.event.tick.LevelTickEvent;
 
 @Mod(value = ImmersiveWorldmap.MOD_ID, dist = Dist.CLIENT)
@@ -31,6 +32,13 @@ public class ImmersiveWorldmapNeoForge {
     public static void onWorldLoad(LevelTickEvent.Pre event) {
         if (event.getLevel() instanceof ClientLevel) {
             ImmersiveWorldmap.initializeDatabase();
+        }
+    }
+
+    @SubscribeEvent
+    public static void onWorldUnload(LevelEvent.Unload event) {
+        if (event.getLevel() instanceof ClientLevel) {
+            ImmersiveWorldmap.shutdown();
         }
     }
 }

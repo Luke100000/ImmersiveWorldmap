@@ -2,11 +2,8 @@ package net.conczin.immersive_worldmap.screen;
 
 import com.mojang.blaze3d.systems.RenderSystem;
 import com.mojang.blaze3d.vertex.MeshData;
-import com.mojang.blaze3d.vertex.Tesselator;
 import com.mojang.blaze3d.vertex.VertexBuffer;
 import com.mojang.blaze3d.vertex.VertexSorting;
-import net.conczin.immersive_worldmap.lod.ChunkLodProcessor;
-import net.conczin.immersive_worldmap.lod.LodChunkData;
 import net.conczin.immersive_worldmap.lod.LodChunkRenderer;
 import net.minecraft.client.Minecraft;
 import net.minecraft.client.gui.GuiGraphics;
@@ -18,13 +15,17 @@ import net.minecraft.world.level.ChunkPos;
 import org.joml.Matrix4f;
 import org.joml.Quaternionf;
 
+import java.util.concurrent.CompletableFuture;
+
 public class LodViewerScreen extends Screen {
     private final Minecraft minecraft;
     private VertexBuffer vertexBuffer;
+    private CompletableFuture<MeshData> meshFuture;
     private int chunkX;
     private int chunkZ;
     private String dimension;
     private boolean hasData = false;
+    private boolean isLoading = false;
     private int chunkHeight = 384; // Default, updated when data loads
 
     public LodViewerScreen() {
@@ -45,38 +46,64 @@ public class LodViewerScreen extends Screen {
         this.chunkZ = chunkPos.z;
         this.dimension = minecraft.level.dimension().location().toString();
 
-        // Load LOD data
-        LodChunkData lodData = ChunkLodProcessor.getLodChunkData(chunkX, chunkZ, dimension, 0);
+        // Start async mesh building
+        isLoading = true;
+        hasData = false;
 
-        if (lodData != null) {
-            chunkHeight = lodData.getHeight();
-            buildMesh(lodData);
-            hasData = true;
-        } else {
+        meshFuture = LodChunkRenderer.buildMesh(chunkX, chunkZ, dimension, 0);
+        meshFuture.thenAccept(meshData -> {
+            // This runs on the executor thread, we need to handle the result on render thread
+            if (meshData != null) {
+                // We'll upload the mesh on the next render call
+                isLoading = false;
+                hasData = true;
+            } else {
+                isLoading = false;
+                hasData = false;
+            }
+        }).exceptionally(throwable -> {
+            isLoading = false;
             hasData = false;
-        }
+            return null;
+        });
     }
 
-    private void buildMesh(LodChunkData lodData) {
-        // Clean up old buffer
-        if (vertexBuffer != null) {
-            vertexBuffer.close();
+    private void uploadMeshIfReady() {
+        if (meshFuture != null && meshFuture.isDone() && !meshFuture.isCompletedExceptionally()) {
+            try {
+                MeshData meshData = meshFuture.getNow(null);
+                if (meshData != null) {
+                    // Clean up old buffer
+                    if (vertexBuffer != null) {
+                        vertexBuffer.close();
+                    }
+
+                    // Upload to GPU on render thread
+                    vertexBuffer = new VertexBuffer(VertexBuffer.Usage.STATIC);
+                    vertexBuffer.bind();
+                    vertexBuffer.upload(meshData);
+                    VertexBuffer.unbind();
+
+                    // Estimate chunk height from mesh data
+                    // This is approximate, but works for visualization
+                    chunkHeight = 384; // Default height
+                }
+                // Clear the future so we don't try to upload again
+                meshFuture = null;
+            } catch (Exception e) {
+                // Error occurred, clear future
+                meshFuture = null;
+                hasData = false;
+            }
         }
-
-        // Build new mesh
-        Tesselator tesselator = Tesselator.getInstance();
-        MeshData meshData = LodChunkRenderer.buildMesh(lodData, tesselator);
-
-        // Upload to GPU
-        vertexBuffer = new VertexBuffer(VertexBuffer.Usage.STATIC);
-        vertexBuffer.bind();
-        vertexBuffer.upload(meshData);
-        VertexBuffer.unbind();
     }
 
     @Override
     public void render(GuiGraphics graphics, int mouseX, int mouseY, float partialTick) {
         super.render(graphics, mouseX, mouseY, partialTick);
+
+        // Try to upload mesh if it's ready
+        uploadMeshIfReady();
 
         // Draw background
         this.renderBackground(graphics, mouseX, mouseY, partialTick);
@@ -87,6 +114,11 @@ public class LodViewerScreen extends Screen {
         // Draw chunk info
         graphics.drawString(this.font, "Chunk: " + chunkX + ", " + chunkZ, 20, 40, 0xFFFFFF);
         graphics.drawString(this.font, "Dimension: " + dimension, 20, 52, 0xFFFFFF);
+
+        if (isLoading) {
+            graphics.drawCenteredString(this.font, "Loading...", this.width / 2, this.height / 2, 0xFFFF55);
+            return;
+        }
 
         if (!hasData) {
             graphics.drawCenteredString(this.font, "No LOD data available", this.width / 2, this.height / 2, 0xFF5555);
@@ -139,6 +171,11 @@ public class LodViewerScreen extends Screen {
 
     @Override
     public void onClose() {
+        // Cancel pending mesh future
+        if (meshFuture != null && !meshFuture.isDone()) {
+            meshFuture.cancel(true);
+        }
+
         if (vertexBuffer != null) {
             vertexBuffer.close();
             vertexBuffer = null;

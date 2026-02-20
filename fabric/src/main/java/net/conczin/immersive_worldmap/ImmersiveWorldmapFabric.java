@@ -9,6 +9,6 @@ public class ImmersiveWorldmapFabric implements ClientModInitializer {
         ImmersiveWorldmap.init();
         KeyBindingsFabric.register();
         ClientPlayConnectionEvents.JOIN.register((handler, sender, client) -> ImmersiveWorldmap.initializeDatabase());
-
+        ClientPlayConnectionEvents.DISCONNECT.register((handler, client) -> ImmersiveWorldmap.shutdown());
     }
 }

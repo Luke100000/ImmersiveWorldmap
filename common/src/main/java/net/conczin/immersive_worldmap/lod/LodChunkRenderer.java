@@ -1,31 +1,41 @@
 package net.conczin.immersive_worldmap.lod;
 
-import com.mojang.blaze3d.vertex.BufferBuilder;
-import com.mojang.blaze3d.vertex.DefaultVertexFormat;
-import com.mojang.blaze3d.vertex.MeshData;
-import com.mojang.blaze3d.vertex.Tesselator;
-import com.mojang.blaze3d.vertex.VertexFormat;
+import com.mojang.blaze3d.vertex.*;
 import net.conczin.immersive_worldmap.util.ColorManager;
+
+import java.util.concurrent.CompletableFuture;
+
+import static net.conczin.immersive_worldmap.lod.ChunkLodProcessor.EXECUTOR;
 
 /**
  * Renders LOD chunk data as a mesh.
  * Uses greedy meshing to build optimized geometry from voxel data.
  */
 public class LodChunkRenderer {
-
     /**
-     * Builds a mesh from LOD chunk data.
-     * Only renders non-air blocks with visible faces (greedy meshing).
+     * Asynchronously builds a mesh from chunk coordinates.
+     * Fetches LOD data in the background thread to avoid IO spikes.
      *
-     * @param lodData the LOD chunk data
-     * @param tesselator the tesselator to use
-     * @return the built mesh data
+     * @param chunkX    chunk X coordinate
+     * @param chunkZ    chunk Z coordinate
+     * @param dimension dimension identifier
+     * @param lod       LOD level
+     * @return CompletableFuture that will contain the built mesh data, or null if no data exists
      */
-    public static MeshData buildMesh(LodChunkData lodData, Tesselator tesselator) {
+    public static CompletableFuture<MeshData> buildMesh(int chunkX, int chunkZ, String dimension, int lod) {
+        return CompletableFuture.supplyAsync(() -> buildMeshSync(chunkX, chunkZ, dimension, lod), EXECUTOR);
+    }
+
+    public static MeshData buildMeshSync(int chunkX, int chunkZ, String dimension, int lod) {
+        Tesselator tesselator = new Tesselator(); // TODO: Use a pool here
         BufferBuilder builder = tesselator.begin(VertexFormat.Mode.QUADS, DefaultVertexFormat.POSITION_COLOR_NORMAL);
 
-        float offsetX = lodData.chunkX() * 16.0F;
-        float offsetZ = lodData.chunkZ() * 16.0F;
+        LodChunkData lodData = ChunkLodProcessor.getLodChunkData(chunkX, chunkZ, dimension, lod);
+
+        if (lodData == null) {
+            return null;
+        }
+
         int height = lodData.getHeight();
 
         // Different shading for each face direction
@@ -51,21 +61,21 @@ public class LodChunkRenderer {
                     int a = color[3];
 
                     // Pre-calculate brightness-adjusted colors for each face direction
-                    int rTop = (int)(r * topBrightness);
-                    int gTop = (int)(g * topBrightness);
-                    int bTop = (int)(b * topBrightness);
+                    int rTop = (int) (r * topBrightness);
+                    int gTop = (int) (g * topBrightness);
+                    int bTop = (int) (b * topBrightness);
 
-                    int rBottom = (int)(r * bottomBrightness);
-                    int gBottom = (int)(g * bottomBrightness);
-                    int bBottom = (int)(b * bottomBrightness);
+                    int rBottom = (int) (r * bottomBrightness);
+                    int gBottom = (int) (g * bottomBrightness);
+                    int bBottom = (int) (b * bottomBrightness);
 
-                    int rSide = (int)(r * sideBrightness);
-                    int gSide = (int)(g * sideBrightness);
-                    int bSide = (int)(b * sideBrightness);
+                    int rSide = (int) (r * sideBrightness);
+                    int gSide = (int) (g * sideBrightness);
+                    int bSide = (int) (b * sideBrightness);
 
-                    int rSideEW = (int)(r * sideEWBrightness);
-                    int gSideEW = (int)(g * sideEWBrightness);
-                    int bSideEW = (int)(b * sideEWBrightness);
+                    int rSideEW = (int) (r * sideEWBrightness);
+                    int gSideEW = (int) (g * sideEWBrightness);
+                    int bSideEW = (int) (b * sideEWBrightness);
 
                     float x0 = x;
                     float y0 = y;
@@ -124,11 +134,6 @@ public class LodChunkRenderer {
                 }
             }
         }
-
-        builder.addVertex(0,0,1).setColor(1,0,0,1).setNormal(0,1,0);
-        builder.addVertex(1,0,1).setColor(1,0,0,1).setNormal(0,1,0);
-        builder.addVertex(1,1,1).setColor(1,0,0,1).setNormal(0,1,0);
-        builder.addVertex(0,1,1).setColor(1,0,0,1).setNormal(0,1,0);
 
         return builder.buildOrThrow();
     }
