@@ -7,6 +7,10 @@ import net.minecraft.world.level.chunk.LevelChunk;
 import net.minecraft.world.level.chunk.LevelChunkSection;
 
 import java.sql.SQLException;
+import java.util.Collections;
+import java.util.LinkedHashMap;
+import java.util.Map;
+import java.util.Objects;
 import java.util.concurrent.ExecutorService;
 
 /**
@@ -14,6 +18,16 @@ import java.util.concurrent.ExecutorService;
  */
 public class ChunkLodProcessor {
     public static final ExecutorService EXECUTOR = ThreadPoolUtil.createLowPriorityFixedThreadPool("ImmersiveWorldmap");
+
+    private static final int LOD_CACHE_SIZE = 256;
+    private static final Map<CacheKey, LodChunkData> LOD_CACHE = Collections.synchronizedMap(
+            new LinkedHashMap<>(LOD_CACHE_SIZE, 0.75f, true) {
+                @Override
+                protected boolean removeEldestEntry(Map.Entry<CacheKey, LodChunkData> eldest) {
+                    return size() > LOD_CACHE_SIZE;
+                }
+            }
+    );
 
     public static void shutdown() {
         EXECUTOR.shutdownNow();
@@ -56,11 +70,21 @@ public class ChunkLodProcessor {
             }
         }
 
+        upsertChunkData(chunkX, chunkZ, dimension, 0, chunkData);
+    }
+
+    private static void upsertChunkData(int chunkX, int chunkZ, String dimension, int lod, byte[] data) {
         try {
-            DatabaseManager.getInstance().upsertChunk(chunkX, chunkZ, dimension, 0, chunkData);
+            DatabaseManager.getInstance().upsertChunk(chunkX, chunkZ, dimension, lod, data);
+            clearLodCacheForLevel(chunkX, chunkZ, dimension, lod);
         } catch (SQLException e) {
             ImmersiveWorldmap.LOGGER.warn("Failed to store chunk LOD data: {}", e.getMessage());
         }
+    }
+
+    private static void clearLodCacheForLevel(int chunkX, int chunkZ, String dimension, int lod) {
+        CacheKey key = new CacheKey(chunkX, chunkZ, dimension, lod);
+        LOD_CACHE.remove(key);
     }
 
     /**
@@ -96,10 +120,35 @@ public class ChunkLodProcessor {
      * @return LodChunkData record, or null if not found
      */
     public static LodChunkData getLodChunkData(int chunkX, int chunkZ, String dimension, int lod) {
+        CacheKey key = new CacheKey(chunkX, chunkZ, dimension, lod);
+        LodChunkData cached = LOD_CACHE.get(key);
+        if (cached != null) {
+            return cached;
+        }
+
         byte[] data = getChunkLodData(chunkX, chunkZ, dimension, lod);
         if (data != null) {
-            return new LodChunkData(chunkX, chunkZ, dimension, lod, data);
+            LodChunkData lodData = new LodChunkData(chunkX, chunkZ, dimension, lod, data);
+            LOD_CACHE.put(key, lodData);
+            return lodData;
         }
         return null;
+    }
+
+    private record CacheKey(int chunkX, int chunkZ, String dimension, int lod) {
+        @Override
+        public boolean equals(Object o) {
+            if (this == o) {
+                return true;
+            }
+            if (!(o instanceof CacheKey(int otherX, int otherZ, String otherDimension, int otherLod))) {
+                return false;
+            }
+            return chunkX == otherX
+                   && chunkZ == otherZ
+                   && lod == otherLod
+                   && Objects.equals(dimension, otherDimension);
+        }
+
     }
 }

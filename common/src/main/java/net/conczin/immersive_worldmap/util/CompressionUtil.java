@@ -4,63 +4,82 @@ import net.jpountz.lz4.LZ4Compressor;
 import net.jpountz.lz4.LZ4Factory;
 import net.jpountz.lz4.LZ4FastDecompressor;
 
-public class CompressionUtil {
-    private static final LZ4Factory factory = LZ4Factory.fastestInstance();
+import java.util.Arrays;
 
-    public static byte[] compress(byte[] data) {
-        byte[] rle = rleEncode(data);
-        LZ4Compressor c = factory.fastCompressor();
-        int max = c.maxCompressedLength(rle.length);
-        byte[] out = new byte[4 + max]; // prefix original RLE length
-        writeInt(out, rle.length);
-        int n = c.compress(rle, 0, rle.length, out, 4, max);
-        return java.util.Arrays.copyOf(out, 4 + n);
+public final class CompressionUtil {
+    private static final LZ4Factory LZ4 = LZ4Factory.fastestInstance();
+    private static final LZ4Compressor C = LZ4.fastCompressor();
+    private static final LZ4FastDecompressor D = LZ4.fastDecompressor();
+
+    private static final ThreadLocal<byte[]> RLE_BUF = ThreadLocal.withInitial(() -> new byte[0]);
+    private static final ThreadLocal<byte[]> COMP_BUF = ThreadLocal.withInitial(() -> new byte[0]);
+
+    private static byte[] ensure(ThreadLocal<byte[]> tl, int need) {
+        byte[] b = tl.get();
+        if (b.length < need) {
+            b = new byte[Math.max(need, b.length + (b.length >>> 1) + 64)];
+            tl.set(b);
+        }
+        return b;
     }
 
-    public static byte[] decompress(byte[] compressed) {
-        int rleLen = readInt(compressed);
-        byte[] rle = new byte[rleLen];
-        LZ4FastDecompressor d = factory.fastDecompressor();
-        d.decompress(compressed, 4, rle, 0, rleLen);
-        return rleDecode(rle);
-    }
-
-    // --- RLE (byte run-length) ---
-    private static byte[] rleEncode(byte[] in) {
-        java.io.ByteArrayOutputStream out = new java.io.ByteArrayOutputStream(in.length);
-        for (int i = 0; i < in.length; ) {
-            byte v = in[i];
+    private static int rleEncodeInto(byte[] src, int srcLen, byte[] dst) {
+        int o = 0;
+        for (int i = 0; i < srcLen; ) {
+            byte v = src[i];
             int run = 1;
-            while (i + run < in.length && in[i + run] == v && run < 255) run++;
-            out.write(run);   // 1..255
-            out.write(v);
+            while (i + run < srcLen && src[i + run] == v && run < 255) run++;
+            dst[o++] = (byte) run;
+            dst[o++] = v;
             i += run;
         }
-        return out.toByteArray();
+        return o;
     }
 
-    private static byte[] rleDecode(byte[] in) {
-        java.io.ByteArrayOutputStream out = new java.io.ByteArrayOutputStream();
-        for (int i = 0; i < in.length; i += 2) {
-            int run = in[i] & 0xFF;
-            byte v = in[i + 1];
-            for (int k = 0; k < run; k++) out.write(v);
+    public static byte[] compress(byte[] data) {
+        byte[] rle = ensure(RLE_BUF, data.length * 2);
+        int rleLen = rleEncodeInto(data, data.length, rle);
+
+        int max = C.maxCompressedLength(rleLen);
+        byte[] out = ensure(COMP_BUF, 8 + max);
+
+        writeInt(out, 0, data.length);
+        writeInt(out, 4, rleLen);
+        int n = C.compress(rle, 0, rleLen, out, 8, max);
+
+        return Arrays.copyOf(out, 8 + n);
+    }
+
+    public static byte[] decompress(byte[] blob) {
+        int origLen = readInt(blob, 0);
+        int rleLen = readInt(blob, 4);
+
+        byte[] rle = ensure(RLE_BUF, rleLen);
+        D.decompress(blob, 8, rle, 0, rleLen);
+
+        byte[] out = new byte[origLen];
+        rleDecodeInto(rle, rleLen, out);
+        return out;
+    }
+
+    private static void rleDecodeInto(byte[] rle, int rleLen, byte[] out) {
+        int p = 0;
+        for (int i = 0; i < rleLen; i += 2) {
+            int run = rle[i] & 0xFF;
+            byte v = rle[i + 1];
+            Arrays.fill(out, p, p + run, v);
+            p += run;
         }
-        return out.toByteArray();
     }
 
-    // --- helpers ---
-    private static void writeInt(byte[] b, int v) {
-        b[0] = (byte) (v >>> 24);
-        b[1] = (byte) (v >>> 16);
-        b[2] = (byte) (v >>> 8);
-        b[3] = (byte) (v);
+    private static void writeInt(byte[] b, int off, int v) {
+        b[off] = (byte) (v >>> 24);
+        b[off + 1] = (byte) (v >>> 16);
+        b[off + 2] = (byte) (v >>> 8);
+        b[off + 3] = (byte) (v);
     }
 
-    private static int readInt(byte[] b) {
-        return ((b[0] & 0xFF) << 24)
-               | ((b[1] & 0xFF) << 16)
-               | ((b[2] & 0xFF) << 8)
-               | (b[3] & 0xFF);
+    private static int readInt(byte[] b, int off) {
+        return ((b[off] & 0xFF) << 24) | ((b[off + 1] & 0xFF) << 16) | ((b[off + 2] & 0xFF) << 8) | (b[off + 3] & 0xFF);
     }
 }
