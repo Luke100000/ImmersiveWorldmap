@@ -17,7 +17,7 @@ import java.util.concurrent.ExecutorService;
  * Processes chunks and generates LODs.
  */
 public class ChunkLodProcessor {
-    public static final ExecutorService EXECUTOR = ThreadPoolUtil.createLowPriorityFixedThreadPool("ImmersiveWorldmap");
+    public static ExecutorService EXECUTOR;
 
     private static final int LOD_CACHE_SIZE = 256;
     private static final Map<CacheKey, LodChunkData> LOD_CACHE = Collections.synchronizedMap(
@@ -29,12 +29,20 @@ public class ChunkLodProcessor {
             }
     );
 
+    public static void start() {
+        EXECUTOR = ThreadPoolUtil.createLowPriorityFixedThreadPool("ImmersiveWorldmap");
+    }
+
     public static void shutdown() {
         EXECUTOR.shutdownNow();
     }
 
     public static void processChunk(LevelChunk chunk) {
         EXECUTOR.submit(() -> processChunkSync(chunk));
+    }
+
+    private static int getIdx(int height, int x, int y, int z) {
+        return (x * height * 16) + (y * 16) + z;
     }
 
     private static void processChunkSync(LevelChunk chunk) {
@@ -63,7 +71,7 @@ public class ChunkLodProcessor {
                     for (int z = 0; z < 16; z++) {
                         int color = section.getBlockState(x, y, z).getBlock().defaultMapColor().id;
                         int ay = (sectionIndex * 16) + y;
-                        int blockIndex = (x * height * 16) + (ay * 16) + z;
+                        int blockIndex = getIdx(height, x, ay, z);
                         chunkData[blockIndex] = (byte) color;
                     }
                 }
@@ -102,12 +110,89 @@ public class ChunkLodProcessor {
         }
 
         try {
-            return DatabaseManager.getInstance().getChunkColors(chunkX, chunkZ, dimension, lod);
+            byte[] chunkColors = DatabaseManager.getInstance().getChunkColors(chunkX, chunkZ, dimension, lod);
+            if (chunkColors != null) {
+                return chunkColors;
+            }
         } catch (SQLException e) {
             ImmersiveWorldmap.LOGGER.warn("Failed to retrieve chunk LOD data: {}", e.getMessage());
         }
 
+        if (lod > 0) {
+            return generateLod(chunkX, chunkZ, dimension, lod);
+        }
+
         return null;
+    }
+
+    private static byte[] generateLod(int chunkX, int chunkZ, String dimension, int lod) {
+        // Fetch the fixed 2x2 grid of source chunks from the previous LOD level
+        int baseX = chunkX * 2;
+        int baseZ = chunkZ * 2;
+        LodChunkData c00 = getLodChunkData(baseX, baseZ, dimension, lod - 1);
+        LodChunkData c10 = getLodChunkData(baseX + 1, baseZ, dimension, lod - 1);
+        LodChunkData c01 = getLodChunkData(baseX, baseZ + 1, dimension, lod - 1);
+        LodChunkData c11 = getLodChunkData(baseX + 1, baseZ + 1, dimension, lod - 1);
+
+        int maxSourceHeight = 0;
+        maxSourceHeight = Math.max(maxSourceHeight, c00.getHeight());
+        maxSourceHeight = Math.max(maxSourceHeight, c10.getHeight());
+        maxSourceHeight = Math.max(maxSourceHeight, c01.getHeight());
+        maxSourceHeight = Math.max(maxSourceHeight, c11.getHeight());
+
+        if (maxSourceHeight == 0) {
+            return null;
+        }
+
+        int outHeight = Math.max(1, maxSourceHeight / 2);
+        byte[] result = new byte[16 * outHeight * 16];
+
+        int[] freq = new int[256];
+        int[] values = new int[8];
+
+        // For all 4 parent chunks
+        for (int cx = 0; cx < 2; cx++) {
+            for (int cz = 0; cz < 2; cz++) {
+                LodChunkData src = cx == 0 ? (cz == 0 ? c00 : c01) : (cz == 0 ? c10 : c11);
+                if (src.empty()) continue;
+
+                // And over all output bytes
+                for (int x = 0; x < 8; x++) {
+                    for (int z = 0; z < 8; z++) {
+                        for (int y = 0; y < outHeight; y++) {
+                            byte modeVal = 0;
+                            int modeCount = 0;
+                            int count = 0;
+
+                            // Filter a 2x2x2 block
+                            for (int dx = 0; dx < 2; dx++) {
+                                for (int dy = 0; dy < 2; dy++) {
+                                    for (int dz = 0; dz < 2; dz++) {
+                                        byte i = src.getBlock(x * 2 + dx, y * 2 + dy, z * 2 + dz);
+                                        int c = ++freq[i & 0xFF];
+                                        if (c > modeCount) {
+                                            modeVal = i;
+                                            modeCount = c;
+                                        }
+                                        values[count++] = i;
+                                    }
+                                }
+                            }
+
+                            for (int i = 0; i < count; i++) {
+                                freq[values[i]] = 0;
+                            }
+
+                            result[getIdx(outHeight, cx * 8 + x, y, cz * 8 + z)] = modeVal;
+                        }
+                    }
+                }
+            }
+        }
+
+        upsertChunkData(chunkX, chunkZ, dimension, lod, result);
+
+        return result;
     }
 
     /**
@@ -127,12 +212,9 @@ public class ChunkLodProcessor {
         }
 
         byte[] data = getChunkLodData(chunkX, chunkZ, dimension, lod);
-        if (data != null) {
-            LodChunkData lodData = new LodChunkData(chunkX, chunkZ, dimension, lod, data);
-            LOD_CACHE.put(key, lodData);
-            return lodData;
-        }
-        return null;
+        LodChunkData lodData = new LodChunkData(chunkX, chunkZ, dimension, lod, data);
+        LOD_CACHE.put(key, lodData);
+        return lodData;
     }
 
     private record CacheKey(int chunkX, int chunkZ, String dimension, int lod) {

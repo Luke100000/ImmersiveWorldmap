@@ -27,7 +27,7 @@ public class LodChunkRenderer {
 
     public static MeshData buildMeshSync(int chunkX, int chunkZ, String dimension, int lod) {
         LodChunkData lodData = ChunkLodProcessor.getLodChunkData(chunkX, chunkZ, dimension, lod);
-        if (lodData == null) {
+        if (lodData.empty()) {
             return null;
         }
 
@@ -160,16 +160,16 @@ public class LodChunkRenderer {
         }
 
         if (x < 0) {
-            return isAirInChunk(west, x + 16, y, z);
+            return isAir(west, x + 16, y, z);
         }
         if (x > 15) {
-            return isAirInChunk(east, x - 16, y, z);
+            return isAir(east, x - 16, y, z);
         }
         if (z < 0) {
-            return isAirInChunk(north, x, y, z + 16);
+            return isAir(north, x, y, z + 16);
         }
         if (z > 15) {
-            return isAirInChunk(south, x, y, z - 16);
+            return isAir(south, x, y, z - 16);
         }
 
         if (y >= center.getHeight()) {
@@ -178,10 +178,7 @@ public class LodChunkRenderer {
         return center.getBlock(x, y, z) == 0;
     }
 
-    private static boolean isAirInChunk(LodChunkData chunk, int x, int y, int z) {
-        if (chunk == null || y >= chunk.getHeight()) {
-            return true;
-        }
+    private static boolean isAir(LodChunkData chunk, int x, int y, int z) {
         return chunk.getBlock(x, y, z) == 0;
     }
 }

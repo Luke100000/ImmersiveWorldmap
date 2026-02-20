@@ -24,7 +24,9 @@ public class ImmersiveWorldmap {
         DatabaseManager.shutdown();
     }
 
-    public static void initializeDatabase() {
+    public static void start() {
+        ChunkLodProcessor.start();
+
         if (DatabaseManager.isInitialized()) {
             DatabaseManager.shutdown();
         }

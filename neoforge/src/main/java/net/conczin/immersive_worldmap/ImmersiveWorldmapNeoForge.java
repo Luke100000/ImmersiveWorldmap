@@ -31,7 +31,7 @@ public class ImmersiveWorldmapNeoForge {
     @SubscribeEvent
     public static void onWorldLoad(LevelTickEvent.Pre event) {
         if (event.getLevel() instanceof ClientLevel) {
-            ImmersiveWorldmap.initializeDatabase();
+            ImmersiveWorldmap.start();
         }
     }
 

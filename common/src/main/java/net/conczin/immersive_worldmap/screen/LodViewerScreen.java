@@ -42,15 +42,15 @@ public class LodViewerScreen extends Screen {
         BlockPos playerPos = minecraft.player.blockPosition();
         ChunkPos chunkPos = new ChunkPos(playerPos);
 
-        this.chunkX = chunkPos.x;
-        this.chunkZ = chunkPos.z;
+        this.chunkX = chunkPos.x >> 8;
+        this.chunkZ = chunkPos.z >> 8;
         this.dimension = minecraft.level.dimension().location().toString();
 
         // Start async mesh building
         isLoading = true;
         hasData = false;
 
-        meshFuture = LodChunkRenderer.buildMesh(chunkX, chunkZ, dimension, 0);
+        meshFuture = LodChunkRenderer.buildMesh(chunkX, chunkZ, dimension, 4);
         meshFuture.thenAccept(meshData -> {
             // This runs on the executor thread, we need to handle the result on render thread
             if (meshData != null) {
@@ -64,6 +64,7 @@ public class LodViewerScreen extends Screen {
         }).exceptionally(throwable -> {
             isLoading = false;
             hasData = false;
+            throwable.printStackTrace();
             return null;
         });
     }
@@ -86,7 +87,7 @@ public class LodViewerScreen extends Screen {
 
                     // Estimate chunk height from mesh data
                     // This is approximate, but works for visualization
-                    chunkHeight = 384; // Default height
+                    chunkHeight = (int) (384 / Math.pow(2, 3)); // Default height
                 }
                 // Clear the future so we don't try to upload again
                 meshFuture = null;
