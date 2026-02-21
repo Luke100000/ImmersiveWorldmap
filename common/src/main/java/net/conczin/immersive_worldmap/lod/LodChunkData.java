@@ -8,7 +8,7 @@ package net.conczin.immersive_worldmap.lod;
  * @param chunkZ    chunk Z coordinate
  * @param dimension dimension identifier
  * @param lodLevel  LOD level (0 = highest detail)
- * @param data      byte array (0=air, 1=non-air)
+ * @param data      byte array (0 = air, other values represent block colors)
  */
 public record LodChunkData(
         int chunkX,

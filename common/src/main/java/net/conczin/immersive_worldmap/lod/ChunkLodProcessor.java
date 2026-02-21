@@ -11,13 +11,13 @@ import java.util.Collections;
 import java.util.LinkedHashMap;
 import java.util.Map;
 import java.util.Objects;
-import java.util.concurrent.ExecutorService;
+import java.util.concurrent.ThreadPoolExecutor;
 
 /**
  * Processes chunks and generates LODs.
  */
 public class ChunkLodProcessor {
-    public static ExecutorService EXECUTOR;
+    public static ThreadPoolExecutor EXECUTOR;
 
     private static final int LOD_CACHE_SIZE = 256;
     private static final Map<CacheKey, LodChunkData> LOD_CACHE = Collections.synchronizedMap(
@@ -31,6 +31,7 @@ public class ChunkLodProcessor {
 
     public static void start() {
         EXECUTOR = ThreadPoolUtil.createLowPriorityFixedThreadPool("ImmersiveWorldmap");
+        LOD_CACHE.clear();
     }
 
     public static void shutdown() {
@@ -129,22 +130,9 @@ public class ChunkLodProcessor {
         // Fetch the fixed 2x2 grid of source chunks from the previous LOD level
         int baseX = chunkX * 2;
         int baseZ = chunkZ * 2;
-        LodChunkData c00 = getLodChunkData(baseX, baseZ, dimension, lod - 1);
-        LodChunkData c10 = getLodChunkData(baseX + 1, baseZ, dimension, lod - 1);
-        LodChunkData c01 = getLodChunkData(baseX, baseZ + 1, dimension, lod - 1);
-        LodChunkData c11 = getLodChunkData(baseX + 1, baseZ + 1, dimension, lod - 1);
+        LodChunkData base = getLodChunkData(baseX, baseZ, dimension, lod - 1);
 
-        int maxSourceHeight = 0;
-        maxSourceHeight = Math.max(maxSourceHeight, c00.getHeight());
-        maxSourceHeight = Math.max(maxSourceHeight, c10.getHeight());
-        maxSourceHeight = Math.max(maxSourceHeight, c01.getHeight());
-        maxSourceHeight = Math.max(maxSourceHeight, c11.getHeight());
-
-        if (maxSourceHeight == 0) {
-            return null;
-        }
-
-        int outHeight = Math.max(1, maxSourceHeight / 2);
+        int outHeight = Math.max(1, base.getHeight() / 2);
         byte[] result = new byte[16 * outHeight * 16];
 
         int[] freq = new int[256];
@@ -153,7 +141,7 @@ public class ChunkLodProcessor {
         // For all 4 parent chunks
         for (int cx = 0; cx < 2; cx++) {
             for (int cz = 0; cz < 2; cz++) {
-                LodChunkData src = cx == 0 ? (cz == 0 ? c00 : c01) : (cz == 0 ? c10 : c11);
+                LodChunkData src = getLodChunkData(baseX + cx, baseZ + cz, dimension, lod - 1);
                 if (src.empty()) continue;
 
                 // And over all output bytes
@@ -169,12 +157,15 @@ public class ChunkLodProcessor {
                                 for (int dy = 0; dy < 2; dy++) {
                                     for (int dz = 0; dz < 2; dz++) {
                                         byte i = src.getBlock(x * 2 + dx, y * 2 + dy, z * 2 + dz);
-                                        int c = ++freq[i & 0xFF];
+                                        byte top = src.getBlock(x * 2 + dx, y * 2 + dy + 1, z * 2 + dz);
+                                        int is = i & 0xFF;
+                                        // Prefer exposed blocks
+                                        int c = (freq[is] += top == 0 ? 2 : 1);
                                         if (c > modeCount) {
                                             modeVal = i;
                                             modeCount = c;
                                         }
-                                        values[count++] = i;
+                                        values[count++] = is;
                                     }
                                 }
                             }

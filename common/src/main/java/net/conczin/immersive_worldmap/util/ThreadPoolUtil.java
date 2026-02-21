@@ -1,14 +1,14 @@
 package net.conczin.immersive_worldmap.util;
 
-import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.concurrent.ThreadFactory;
+import java.util.concurrent.ThreadPoolExecutor;
 
 public final class ThreadPoolUtil {
     private ThreadPoolUtil() {
     }
 
-    public static ExecutorService createLowPriorityFixedThreadPool(String namePrefix) {
+    public static ThreadPoolExecutor createLowPriorityFixedThreadPool(String namePrefix) {
         int cores = Runtime.getRuntime().availableProcessors();
         int threads = Math.max(1, cores - 2);
         ThreadFactory threadFactory = r -> {
@@ -18,7 +18,7 @@ public final class ThreadPoolUtil {
             thread.setDaemon(true);
             return thread;
         };
-        return Executors.newFixedThreadPool(threads, threadFactory);
+        return (ThreadPoolExecutor) Executors.newFixedThreadPool(threads, threadFactory);
     }
 }
 

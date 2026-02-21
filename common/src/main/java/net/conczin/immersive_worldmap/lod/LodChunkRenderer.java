@@ -10,6 +10,7 @@ import java.util.concurrent.CompletableFuture;
  * Renders LOD chunk data as a mesh.
  * Uses greedy meshing to build optimized geometry from voxel data.
  */
+@SuppressWarnings("DuplicatedCode")
 public class LodChunkRenderer {
     /**
      * Asynchronously builds a mesh from chunk coordinates.
@@ -26,8 +27,8 @@ public class LodChunkRenderer {
     }
 
     public static MeshData buildMeshSync(int chunkX, int chunkZ, String dimension, int lod) {
-        LodChunkData lodData = ChunkLodProcessor.getLodChunkData(chunkX, chunkZ, dimension, lod);
-        if (lodData.empty()) {
+        LodChunkData center = ChunkLodProcessor.getLodChunkData(chunkX, chunkZ, dimension, lod);
+        if (center.empty()) {
             return null;
         }
 
@@ -38,9 +39,9 @@ public class LodChunkRenderer {
 
         Tesselator tesselator = TesselatorPool.acquire();
         try {
-            BufferBuilder builder = tesselator.begin(VertexFormat.Mode.QUADS, DefaultVertexFormat.POSITION_COLOR_NORMAL);
+            BufferBuilder builder = tesselator.begin(VertexFormat.Mode.QUADS, DefaultVertexFormat.POSITION_COLOR);
 
-            int height = lodData.getHeight();
+            int height = center.getHeight();
 
             // Different shading for each face direction
             float topBrightness = 1.0F;
@@ -52,88 +53,157 @@ public class LodChunkRenderer {
             for (int x = 0; x < 16; x++) {
                 for (int y = 0; y < height; y++) {
                     for (int z = 0; z < 16; z++) {
-                        byte blockColorId = lodData.getBlock(x, y, z);
+                        byte blockColorId = center.getBlock(x, y, z);
                         if (blockColorId == 0) {
                             continue; // Skip air blocks (MapColor.NONE has id 0)
                         }
 
                         // Get RGBA color from ColorManager
                         int[] color = ColorManager.byteToRGBA(blockColorId);
-                        int r = color[0];
+                        int b = color[0];
                         int g = color[1];
-                        int b = color[2];
-                        int a = color[3];
+                        int r = color[2];
+
+                        // Add noise
+                        int noise = (int) ((Math.random() - 0.5) * 16);
+                        r = Math.max(0, Math.min(255, r + noise));
+                        g = Math.max(0, Math.min(255, g + noise));
+                        b = Math.max(0, Math.min(255, b + noise));
 
                         // Pre-calculate brightness-adjusted colors for each face direction
-                        int rTop = (int) (r * topBrightness);
-                        int gTop = (int) (g * topBrightness);
-                        int bTop = (int) (b * topBrightness);
+                        float rTop = r * topBrightness;
+                        float gTop = g * topBrightness;
+                        float bTop = b * topBrightness;
 
-                        int rBottom = (int) (r * bottomBrightness);
-                        int gBottom = (int) (g * bottomBrightness);
-                        int bBottom = (int) (b * bottomBrightness);
+                        float rBottom = r * bottomBrightness;
+                        float gBottom = g * bottomBrightness;
+                        float bBottom = b * bottomBrightness;
 
-                        int rSide = (int) (r * sideBrightness);
-                        int gSide = (int) (g * sideBrightness);
-                        int bSide = (int) (b * sideBrightness);
+                        float rSide = r * sideBrightness;
+                        float gSide = g * sideBrightness;
+                        float bSide = b * sideBrightness;
 
-                        int rSideEW = (int) (r * sideEWBrightness);
-                        int gSideEW = (int) (g * sideEWBrightness);
-                        int bSideEW = (int) (b * sideEWBrightness);
+                        float rSideEW = r * sideEWBrightness;
+                        float gSideEW = g * sideEWBrightness;
+                        float bSideEW = b * sideEWBrightness;
 
-                        float x0 = x;
-                        float y0 = y;
-                        float z0 = z;
-                        float x1 = x0 + 1.0F;
-                        float y1 = y0 + 1.0F;
-                        float z1 = z0 + 1.0F;
+                        int x1 = x + 1;
+                        int y1 = y + 1;
+                        int z1 = z + 1;
 
                         // Top face (Y+)
-                        if (isAirWithNeighbors(lodData, north, south, west, east, x, y + 1, z)) {
-                            builder.addVertex(x0, y1, z1).setColor(rTop, gTop, bTop, a).setNormal(0.0F, 1.0F, 0.0F);
-                            builder.addVertex(x1, y1, z1).setColor(rTop, gTop, bTop, a).setNormal(0.0F, 1.0F, 0.0F);
-                            builder.addVertex(x1, y1, z0).setColor(rTop, gTop, bTop, a).setNormal(0.0F, 1.0F, 0.0F);
-                            builder.addVertex(x0, y1, z0).setColor(rTop, gTop, bTop, a).setNormal(0.0F, 1.0F, 0.0F);
+                        if (isAirWithNeighbors(center, north, south, west, east, x, y + 1, z)) {
+                            float ao00 = vertexAO(center, north, south, west, east, x - 1, y + 1, z, x, y + 1, z - 1, x - 1, y + 1, z - 1);
+                            float ao10 = vertexAO(center, north, south, west, east, x + 1, y + 1, z, x, y + 1, z - 1, x + 1, y + 1, z - 1);
+                            float ao11 = vertexAO(center, north, south, west, east, x + 1, y + 1, z, x, y + 1, z + 1, x + 1, y + 1, z + 1);
+                            float ao01 = vertexAO(center, north, south, west, east, x - 1, y + 1, z, x, y + 1, z + 1, x - 1, y + 1, z + 1);
+                            if (ao00 + ao11 > ao01 + ao10) {
+                                v(builder, x, y1, z, rTop, gTop, bTop, ao00);
+                                v(builder, x, y1, z1, rTop, gTop, bTop, ao01);
+                                v(builder, x1, y1, z1, rTop, gTop, bTop, ao11);
+                                v(builder, x1, y1, z, rTop, gTop, bTop, ao10);
+                            } else {
+                                v(builder, x, y1, z1, rTop, gTop, bTop, ao01);
+                                v(builder, x1, y1, z1, rTop, gTop, bTop, ao11);
+                                v(builder, x1, y1, z, rTop, gTop, bTop, ao10);
+                                v(builder, x, y1, z, rTop, gTop, bTop, ao00);
+                            }
                         }
 
                         // Bottom face (Y-)
-                        if (isAirWithNeighbors(lodData, north, south, west, east, x, y - 1, z)) {
-                            builder.addVertex(x0, y0, z0).setColor(rBottom, gBottom, bBottom, a).setNormal(0.0F, -1.0F, 0.0F);
-                            builder.addVertex(x1, y0, z0).setColor(rBottom, gBottom, bBottom, a).setNormal(0.0F, -1.0F, 0.0F);
-                            builder.addVertex(x1, y0, z1).setColor(rBottom, gBottom, bBottom, a).setNormal(0.0F, -1.0F, 0.0F);
-                            builder.addVertex(x0, y0, z1).setColor(rBottom, gBottom, bBottom, a).setNormal(0.0F, -1.0F, 0.0F);
+                        //noinspection PointlessBooleanExpression
+                        if (isAirWithNeighbors(center, north, south, west, east, x, y - 1, z) && false) {
+                            float ao00 = vertexAO(center, north, south, west, east, x - 1, y - 1, z, x, y - 1, z - 1, x - 1, y - 1, z - 1);
+                            float ao10 = vertexAO(center, north, south, west, east, x + 1, y - 1, z, x, y - 1, z - 1, x + 1, y - 1, z - 1);
+                            float ao11 = vertexAO(center, north, south, west, east, x + 1, y - 1, z, x, y - 1, z + 1, x + 1, y - 1, z + 1);
+                            float ao01 = vertexAO(center, north, south, west, east, x - 1, y - 1, z, x, y - 1, z + 1, x - 1, y - 1, z + 1);
+                            if (ao00 + ao11 > ao01 + ao10) {
+                                v(builder, x, y, z, rBottom, gBottom, bBottom, ao00);
+                                v(builder, x, y, z1, rBottom, gBottom, bBottom, ao01);
+                                v(builder, x1, y, z1, rBottom, gBottom, bBottom, ao11);
+                                v(builder, x1, y, z, rBottom, gBottom, bBottom, ao10);
+                            } else {
+                                v(builder, x, y, z, rBottom, gBottom, bBottom, ao00);
+                                v(builder, x1, y, z, rBottom, gBottom, bBottom, ao10);
+                                v(builder, x1, y, z1, rBottom, gBottom, bBottom, ao11);
+                                v(builder, x, y, z1, rBottom, gBottom, bBottom, ao01);
+                            }
                         }
 
                         // North face (Z-)
-                        if (isAirWithNeighbors(lodData, north, south, west, east, x, y, z - 1)) {
-                            builder.addVertex(x0, y1, z0).setColor(rSide, gSide, bSide, a).setNormal(0.0F, 0.0F, -1.0F);
-                            builder.addVertex(x1, y1, z0).setColor(rSide, gSide, bSide, a).setNormal(0.0F, 0.0F, -1.0F);
-                            builder.addVertex(x1, y0, z0).setColor(rSide, gSide, bSide, a).setNormal(0.0F, 0.0F, -1.0F);
-                            builder.addVertex(x0, y0, z0).setColor(rSide, gSide, bSide, a).setNormal(0.0F, 0.0F, -1.0F);
+                        if (isAirWithNeighbors(center, north, south, west, east, x, y, z - 1)) {
+                            float ao00 = vertexAO(center, north, south, west, east, x - 1, y, z - 1, x, y - 1, z - 1, x - 1, y - 1, z - 1);
+                            float ao10 = vertexAO(center, north, south, west, east, x + 1, y, z - 1, x, y - 1, z - 1, x + 1, y - 1, z - 1);
+                            float ao11 = vertexAO(center, north, south, west, east, x + 1, y, z - 1, x, y + 1, z - 1, x + 1, y + 1, z - 1);
+                            float ao01 = vertexAO(center, north, south, west, east, x - 1, y, z - 1, x, y + 1, z - 1, x - 1, y + 1, z - 1);
+                            if (ao00 + ao11 > ao01 + ao10) {
+                                v(builder, x, y, z, rSide, gSide, bSide, ao00);
+                                v(builder, x, y1, z, rSide, gSide, bSide, ao01);
+                                v(builder, x1, y1, z, rSide, gSide, bSide, ao11);
+                                v(builder, x1, y, z, rSide, gSide, bSide, ao10);
+                            } else {
+                                v(builder, x, y1, z, rSide, gSide, bSide, ao01);
+                                v(builder, x1, y1, z, rSide, gSide, bSide, ao11);
+                                v(builder, x1, y, z, rSide, gSide, bSide, ao10);
+                                v(builder, x, y, z, rSide, gSide, bSide, ao00);
+                            }
                         }
 
                         // South face (Z+)
-                        if (isAirWithNeighbors(lodData, north, south, west, east, x, y, z + 1)) {
-                            builder.addVertex(x0, y0, z1).setColor(rSide, gSide, bSide, a).setNormal(0.0F, 0.0F, 1.0F);
-                            builder.addVertex(x1, y0, z1).setColor(rSide, gSide, bSide, a).setNormal(0.0F, 0.0F, 1.0F);
-                            builder.addVertex(x1, y1, z1).setColor(rSide, gSide, bSide, a).setNormal(0.0F, 0.0F, 1.0F);
-                            builder.addVertex(x0, y1, z1).setColor(rSide, gSide, bSide, a).setNormal(0.0F, 0.0F, 1.0F);
+                        if (isAirWithNeighbors(center, north, south, west, east, x, y, z + 1)) {
+                            float ao00 = vertexAO(center, north, south, west, east, x - 1, y, z + 1, x, y - 1, z + 1, x - 1, y - 1, z + 1);
+                            float ao10 = vertexAO(center, north, south, west, east, x + 1, y, z + 1, x, y - 1, z + 1, x + 1, y - 1, z + 1);
+                            float ao11 = vertexAO(center, north, south, west, east, x + 1, y, z + 1, x, y + 1, z + 1, x + 1, y + 1, z + 1);
+                            float ao01 = vertexAO(center, north, south, west, east, x - 1, y, z + 1, x, y + 1, z + 1, x - 1, y + 1, z + 1);
+                            if (ao00 + ao11 > ao01 + ao10) {
+                                v(builder, x, y, z1, rSide, gSide, bSide, ao00);
+                                v(builder, x1, y, z1, rSide, gSide, bSide, ao10);
+                                v(builder, x1, y1, z1, rSide, gSide, bSide, ao11);
+                                v(builder, x, y1, z1, rSide, gSide, bSide, ao01);
+                            } else {
+                                v(builder, x1, y, z1, rSide, gSide, bSide, ao10);
+                                v(builder, x1, y1, z1, rSide, gSide, bSide, ao11);
+                                v(builder, x, y1, z1, rSide, gSide, bSide, ao01);
+                                v(builder, x, y, z1, rSide, gSide, bSide, ao00);
+                            }
                         }
 
                         // West face (X-)
-                        if (isAirWithNeighbors(lodData, north, south, west, east, x - 1, y, z)) {
-                            builder.addVertex(x0, y0, z0).setColor(rSideEW, gSideEW, bSideEW, a).setNormal(-1.0F, 0.0F, 0.0F);
-                            builder.addVertex(x0, y0, z1).setColor(rSideEW, gSideEW, bSideEW, a).setNormal(-1.0F, 0.0F, 0.0F);
-                            builder.addVertex(x0, y1, z1).setColor(rSideEW, gSideEW, bSideEW, a).setNormal(-1.0F, 0.0F, 0.0F);
-                            builder.addVertex(x0, y1, z0).setColor(rSideEW, gSideEW, bSideEW, a).setNormal(-1.0F, 0.0F, 0.0F);
+                        if (isAirWithNeighbors(center, north, south, west, east, x - 1, y, z)) {
+                            float ao00 = vertexAO(center, north, south, west, east, x - 1, y, z - 1, x - 1, y - 1, z, x - 1, y - 1, z - 1);
+                            float ao10 = vertexAO(center, north, south, west, east, x - 1, y, z + 1, x - 1, y - 1, z, x - 1, y - 1, z + 1);
+                            float ao11 = vertexAO(center, north, south, west, east, x - 1, y, z + 1, x - 1, y + 1, z, x - 1, y + 1, z + 1);
+                            float ao01 = vertexAO(center, north, south, west, east, x - 1, y, z - 1, x - 1, y + 1, z, x - 1, y + 1, z - 1);
+                            if (ao00 + ao11 > ao01 + ao10) {
+                                v(builder, x, y, z, rSideEW, gSideEW, bSideEW, ao00);
+                                v(builder, x, y, z1, rSideEW, gSideEW, bSideEW, ao10);
+                                v(builder, x, y1, z1, rSideEW, gSideEW, bSideEW, ao11);
+                                v(builder, x, y1, z, rSideEW, gSideEW, bSideEW, ao01);
+                            } else {
+                                v(builder, x, y1, z, rSideEW, gSideEW, bSideEW, ao01);
+                                v(builder, x, y, z, rSideEW, gSideEW, bSideEW, ao00);
+                                v(builder, x, y, z1, rSideEW, gSideEW, bSideEW, ao10);
+                                v(builder, x, y1, z1, rSideEW, gSideEW, bSideEW, ao11);
+                            }
                         }
 
                         // East face (X+)
-                        if (isAirWithNeighbors(lodData, north, south, west, east, x + 1, y, z)) {
-                            builder.addVertex(x1, y1, z0).setColor(rSideEW, gSideEW, bSideEW, a).setNormal(1.0F, 0.0F, 0.0F);
-                            builder.addVertex(x1, y1, z1).setColor(rSideEW, gSideEW, bSideEW, a).setNormal(1.0F, 0.0F, 0.0F);
-                            builder.addVertex(x1, y0, z1).setColor(rSideEW, gSideEW, bSideEW, a).setNormal(1.0F, 0.0F, 0.0F);
-                            builder.addVertex(x1, y0, z0).setColor(rSideEW, gSideEW, bSideEW, a).setNormal(1.0F, 0.0F, 0.0F);
+                        if (isAirWithNeighbors(center, north, south, west, east, x + 1, y, z)) {
+                            float ao00 = vertexAO(center, north, south, west, east, x + 1, y, z - 1, x + 1, y - 1, z, x + 1, y - 1, z - 1);
+                            float ao10 = vertexAO(center, north, south, west, east, x + 1, y, z + 1, x + 1, y - 1, z, x + 1, y - 1, z + 1);
+                            float ao11 = vertexAO(center, north, south, west, east, x + 1, y, z + 1, x + 1, y + 1, z, x + 1, y + 1, z + 1);
+                            float ao01 = vertexAO(center, north, south, west, east, x + 1, y, z - 1, x + 1, y + 1, z, x + 1, y + 1, z - 1);
+                            if (ao00 + ao11 > ao01 + ao10) {
+                                v(builder, x1, y, z, rSideEW, gSideEW, bSideEW, ao00);
+                                v(builder, x1, y1, z, rSideEW, gSideEW, bSideEW, ao01);
+                                v(builder, x1, y1, z1, rSideEW, gSideEW, bSideEW, ao11);
+                                v(builder, x1, y, z1, rSideEW, gSideEW, bSideEW, ao10);
+                            } else {
+                                v(builder, x1, y1, z, rSideEW, gSideEW, bSideEW, ao01);
+                                v(builder, x1, y1, z1, rSideEW, gSideEW, bSideEW, ao11);
+                                v(builder, x1, y, z1, rSideEW, gSideEW, bSideEW, ao10);
+                                v(builder, x1, y, z, rSideEW, gSideEW, bSideEW, ao00);
+                            }
                         }
                     }
                 }
@@ -178,7 +248,25 @@ public class LodChunkRenderer {
         return center.getBlock(x, y, z) == 0;
     }
 
+    private static void v(BufferBuilder b, float x, float y, float z, float r, float g, float col, float ao) {
+        b.addVertex(x, y, z).setColor((int) (r * ao), (int) (g * ao), (int) (col * ao), 255);
+    }
+
     private static boolean isAir(LodChunkData chunk, int x, int y, int z) {
         return chunk.getBlock(x, y, z) == 0;
+    }
+
+    private static float vertexAO(
+            LodChunkData center,
+            LodChunkData north, LodChunkData south, LodChunkData west, LodChunkData east,
+            int sx, int sy, int sz,
+            int cx, int cy, int cz,
+            int ex, int ey, int ez
+    ) {
+        boolean side1 = !isAirWithNeighbors(center, north, south, west, east, sx, sy, sz);
+        boolean side2 = !isAirWithNeighbors(center, north, south, west, east, cx, cy, cz);
+        boolean corner = !isAirWithNeighbors(center, north, south, west, east, ex, ey, ez);
+        if (side1 && side2) return 0.5F;
+        return (3 - ((side1 ? 1 : 0) + (side2 ? 1 : 0) + (corner ? 1 : 0))) / 6.0f + 0.5f;
     }
 }
