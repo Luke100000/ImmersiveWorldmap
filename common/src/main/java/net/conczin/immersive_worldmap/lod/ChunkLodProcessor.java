@@ -208,7 +208,7 @@ public class ChunkLodProcessor {
         return lodData;
     }
 
-    private record CacheKey(int chunkX, int chunkZ, String dimension, int lod) {
+    public record CacheKey(int chunkX, int chunkZ, String dimension, int lod) {
         @Override
         public boolean equals(Object o) {
             if (this == o) {
@@ -223,5 +223,9 @@ public class ChunkLodProcessor {
                    && Objects.equals(dimension, otherDimension);
         }
 
+        @Override
+        public int hashCode() {
+            return Objects.hash(chunkX, chunkZ, dimension, lod);
+        }
     }
 }
