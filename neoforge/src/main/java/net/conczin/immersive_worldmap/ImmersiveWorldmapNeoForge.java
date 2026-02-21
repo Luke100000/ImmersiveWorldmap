@@ -20,6 +20,8 @@ public class ImmersiveWorldmapNeoForge {
 
     @SubscribeEvent
     public static void onClientTick(ClientTickEvent.Post event) {
+        ImmersiveWorldmap.onClientTick();
+
         Minecraft client = Minecraft.getInstance();
         while (KeyBindingsNeoForge.MAP_VIEWER.consumeClick()) {
             if (client.screen == null) {

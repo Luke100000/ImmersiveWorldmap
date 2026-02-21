@@ -2,6 +2,8 @@ package net.conczin.immersive_worldmap;
 
 import net.conczin.immersive_worldmap.database.DatabaseManager;
 import net.conczin.immersive_worldmap.lod.ChunkLodProcessor;
+import net.conczin.immersive_worldmap.lod.LodChunkRendererManager;
+import net.conczin.immersive_worldmap.lod.RenderStateManager;
 import net.minecraft.client.Minecraft;
 import net.minecraft.client.multiplayer.ServerData;
 import net.minecraft.client.server.IntegratedServer;
@@ -19,13 +21,20 @@ public class ImmersiveWorldmap {
         // No-op
     }
 
+    public static void onClientTick() {
+        RenderStateManager.tick();
+    }
+
     public static void shutdown() {
         ChunkLodProcessor.shutdown();
         DatabaseManager.shutdown();
+        LodChunkRendererManager.reset();
+        RenderStateManager.get().clear();
     }
 
     public static void start() {
         ChunkLodProcessor.start();
+        RenderStateManager.get().clear();
 
         if (DatabaseManager.isInitialized()) {
             DatabaseManager.shutdown();

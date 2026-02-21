@@ -209,6 +209,13 @@ public class LodChunkRenderer {
                 }
             }
 
+            // Anti-empty-mesh
+            // TODO
+            v(builder, 0, 0, 0, 1, 1, 1, 1);
+            v(builder, 0, 0, 0, 1, 1, 1, 1);
+            v(builder, 0, 0, 0, 1, 1, 1, 1);
+            v(builder, 0, 0, 0, 1, 1, 1, 1);
+
             return builder.buildOrThrow();
         } finally {
             TesselatorPool.release(tesselator);

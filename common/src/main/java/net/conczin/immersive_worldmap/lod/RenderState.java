@@ -8,7 +8,7 @@ import org.joml.Matrix4f;
 
 import java.util.concurrent.CompletableFuture;
 
-public class RenderState implements AutoCloseable {
+public class RenderState {
     public final int chunkX;
     public final int chunkZ;
     public final int lod;
@@ -32,7 +32,10 @@ public class RenderState implements AutoCloseable {
         CompletableFuture.supplyAsync(
                 () -> LodChunkRenderer.buildMeshSync(chunkX, chunkZ, dimension, lod),
                 ChunkLodProcessor.EXECUTOR
-        ).thenAccept(result -> mesh = result);
+        ).thenAccept(result -> mesh = result).exceptionally(ex -> {
+            ex.printStackTrace();
+            return null;
+        });
     }
 
     // Must be called from the render thread.
@@ -47,13 +50,21 @@ public class RenderState implements AutoCloseable {
         RenderSystem.setShader(GameRenderer::getPositionColorShader);
         var shader = RenderSystem.getShader();
         if (shader == null) return;
+
+        float scale = 1 << lod;
+        float worldX = chunkX * 16f * scale;
+        float worldZ = chunkZ * 16f * scale;
+        Matrix4f localMv = new Matrix4f(mv)
+                .translate(worldX, 0, worldZ)
+                .scale(scale, scale, scale);
+
         vertexBuffer.bind();
-        vertexBuffer.drawWithShader(mv, proj, shader);
+        vertexBuffer.drawWithShader(localMv, proj, shader);
         VertexBuffer.unbind();
     }
 
-    @Override
     public void close() {
+        // TODO
         mesh = null;
         if (vertexBuffer != null) {
             vertexBuffer.close();
