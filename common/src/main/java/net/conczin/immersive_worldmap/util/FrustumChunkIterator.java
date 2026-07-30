@@ -7,7 +7,6 @@ import java.util.Iterator;
 import java.util.NoSuchElementException;
 
 public class FrustumChunkIterator implements Iterator<int[]> {
-
     private final float chunkSideLength;
     private final float halfSide;
     private final float halfHeight;
@@ -45,12 +44,15 @@ public class FrustumChunkIterator implements Iterator<int[]> {
             maxZ = Math.max(maxZ, wz);
         }
 
+
         this.minChunkX = (int) Math.floor(minX / chunkSideLength) - 1;
         this.maxChunkX = (int) Math.ceil(maxX / chunkSideLength);
         this.minChunkZ = (int) Math.floor(minZ / chunkSideLength) - 1;
         this.maxChunkZ = (int) Math.ceil(maxZ / chunkSideLength);
+
         this.curX = minChunkX;
         this.curZ = minChunkZ;
+
         advance();
     }
 

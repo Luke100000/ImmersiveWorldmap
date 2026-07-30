@@ -18,7 +18,7 @@ public class ClientChunkCacheMixin {
             method = "replaceWithPacketData(IILnet/minecraft/network/FriendlyByteBuf;Lnet/minecraft/nbt/CompoundTag;Ljava/util/function/Consumer;)Lnet/minecraft/world/level/chunk/LevelChunk;",
             at = @At("RETURN")
     )
-    private void onReplaceWithPacketData(int x, int z, FriendlyByteBuf buf, CompoundTag tag, Consumer<LevelChunk> consumer, CallbackInfoReturnable<LevelChunk> cir) {
+    private void onReplaceWithPacketData(int pX, int pZ, FriendlyByteBuf pBuffer, CompoundTag pTag, Consumer<LevelChunk> pConsumer, CallbackInfoReturnable<LevelChunk> cir) {
         LevelChunk chunk = cir.getReturnValue();
         if (chunk != null) {
             ChunkLodProcessor.processChunk(chunk);

@@ -1,19 +1,18 @@
-package net.conczin.immersive_worldmap.lod;
+package net.conczin.immersive_worldmap.renderer;
 
 import com.mojang.blaze3d.vertex.*;
+import net.conczin.immersive_worldmap.lod.ChunkLodProcessor;
+import net.conczin.immersive_worldmap.lod.LodChunkData;
 import net.conczin.immersive_worldmap.util.ColorManager;
 import net.conczin.immersive_worldmap.util.TesselatorPool;
-
-import java.util.concurrent.CompletableFuture;
 
 /**
  * Renders LOD chunk data as a mesh.
  * Uses greedy meshing to build optimized geometry from voxel data.
  */
-@SuppressWarnings("DuplicatedCode")
-public class LodChunkRenderer {
+public class LodChunkMeshBuilder {
     /**
-     * Asynchronously builds a mesh from chunk coordinates.
+     * Builds a mesh from chunk coordinates.
      * Fetches LOD data in the background thread to avoid IO spikes.
      *
      * @param chunkX    chunk X coordinate
@@ -22,10 +21,7 @@ public class LodChunkRenderer {
      * @param lod       LOD level
      * @return CompletableFuture that will contain the built mesh data, or null if no data exists
      */
-    public static CompletableFuture<MeshData> buildMesh(int chunkX, int chunkZ, String dimension, int lod) {
-        return CompletableFuture.supplyAsync(() -> buildMeshSync(chunkX, chunkZ, dimension, lod), ChunkLodProcessor.EXECUTOR);
-    }
-
+    @SuppressWarnings("DuplicatedCode")
     public static MeshData buildMeshSync(int chunkX, int chunkZ, String dimension, int lod) {
         LodChunkData center = ChunkLodProcessor.getLodChunkData(chunkX, chunkZ, dimension, lod);
         if (center.empty()) {
@@ -66,9 +62,9 @@ public class LodChunkRenderer {
 
                         // Add noise
                         int noise = (int) ((Math.random() - 0.5) * 16);
-                        r = Math.max(0, Math.min(255, r + noise));
-                        g = Math.max(0, Math.min(255, g + noise));
-                        b = Math.max(0, Math.min(255, b + noise));
+                        r = Math.clamp(r + noise, 0, 255);
+                        g = Math.clamp(g + noise, 0, 255);
+                        b = Math.clamp(b + noise, 0, 255);
 
                         // Pre-calculate brightness-adjusted colors for each face direction
                         float rTop = r * topBrightness;

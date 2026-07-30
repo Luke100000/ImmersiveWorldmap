@@ -15,6 +15,4 @@ public final class Config extends JsonConfig {
 
     @SuppressWarnings("unused")
     public String _documentation = "https://github.com/Luke100000/ImmersiveWorldmap/wiki";
-
-    public boolean enableEntities = true;
 }

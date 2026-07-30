@@ -1,4 +1,4 @@
-package net.conczin.immersive_worldmap.lod;
+package net.conczin.immersive_worldmap.renderer;
 
 import net.conczin.immersive_worldmap.util.FrustumChunkIterator;
 import org.joml.Matrix4f;
@@ -8,11 +8,11 @@ import java.util.List;
 import java.util.concurrent.atomic.AtomicReference;
 import java.util.concurrent.locks.LockSupport;
 
-public class LodChunkRendererManager {
-    private static LodChunkRendererManager INSTANCE;
+public class LodChunkVisibilitySelector {
+    private static LodChunkVisibilitySelector INSTANCE;
 
-    public static LodChunkRendererManager get() {
-        if (INSTANCE == null) INSTANCE = new LodChunkRendererManager();
+    public static LodChunkVisibilitySelector get() {
+        if (INSTANCE == null) INSTANCE = new LodChunkVisibilitySelector();
         return INSTANCE;
     }
 
@@ -36,14 +36,14 @@ public class LodChunkRendererManager {
     private final AtomicReference<CameraSnapshot> pendingSnapshot = new AtomicReference<>(null);
 
     @SuppressWarnings("unchecked")
-    private final List<RenderState>[] buffers = new List[]{new ArrayList<>(), new ArrayList<>()};
+    private final List<LodChunkMesh>[] buffers = new List[]{new ArrayList<>(), new ArrayList<>()};
     private volatile int readIndex = 0;
     private int writeIndex = 1;
 
     private final Thread worker;
     private volatile boolean running = true;
 
-    private LodChunkRendererManager() {
+    private LodChunkVisibilitySelector() {
         worker = new Thread(this::workerLoop, "ImmersiveWorldmap-LodSelection");
         worker.setDaemon(true);
         worker.start();
@@ -75,8 +75,8 @@ public class LodChunkRendererManager {
         return null;
     }
 
-    private List<RenderState> buildVisibleList(CameraSnapshot snapshot) {
-        List<RenderState> result = new ArrayList<>();
+    private List<LodChunkMesh> buildVisibleList(CameraSnapshot snapshot) {
+        List<LodChunkMesh> result = new ArrayList<>();
         FrustumChunkIterator topLevel = new FrustumChunkIterator(snapshot.mv(), snapshot.proj(), CHUNK_SIZE * (1 << TOP_LOD), CHUNK_HEIGHT);
         while (topLevel.hasNext()) {
             int[] c = topLevel.next();
@@ -85,19 +85,19 @@ public class LodChunkRendererManager {
         return result;
     }
 
-    private RenderState traverse(int cx, int cz, int lod, CameraSnapshot snapshot, List<RenderState> result) {
-        RenderState self = RenderStateManager.get().get(cx, cz, lod, snapshot.dimension());
+    private LodChunkMesh traverse(int cx, int cz, int lod, CameraSnapshot snapshot, List<LodChunkMesh> result) {
+        LodChunkMesh self = LodChunkMeshManager.INSTANCE.get(cx, cz, lod, snapshot.dimension());
         if (lod == 0 || !shouldSubdivide(cx, cz, lod, snapshot)) {
             result.add(self);
             return self;
         }
 
         int childLod = lod - 1, baseCx = cx * 2, baseCz = cz * 2;
-        List<RenderState> childResult = new ArrayList<>(4);
-        RenderState r0 = traverse(baseCx, baseCz, childLod, snapshot, childResult);
-        RenderState r1 = traverse(baseCx + 1, baseCz, childLod, snapshot, childResult);
-        RenderState r2 = traverse(baseCx, baseCz + 1, childLod, snapshot, childResult);
-        RenderState r3 = traverse(baseCx + 1, baseCz + 1, childLod, snapshot, childResult);
+        List<LodChunkMesh> childResult = new ArrayList<>(4);
+        LodChunkMesh r0 = traverse(baseCx, baseCz, childLod, snapshot, childResult);
+        LodChunkMesh r1 = traverse(baseCx + 1, baseCz, childLod, snapshot, childResult);
+        LodChunkMesh r2 = traverse(baseCx, baseCz + 1, childLod, snapshot, childResult);
+        LodChunkMesh r3 = traverse(baseCx + 1, baseCz + 1, childLod, snapshot, childResult);
 
         if (r0.isLoaded() && r1.isLoaded() && r2.isLoaded() && r3.isLoaded()) {
             result.addAll(childResult);
@@ -127,7 +127,7 @@ public class LodChunkRendererManager {
         pendingSnapshot.set(new CameraSnapshot(mvCopy, new Matrix4f(proj), dimension, camX, camY, camZ));
     }
 
-    public List<RenderState> visibleChunks() {
+    public List<LodChunkMesh> visibleChunks() {
         return buffers[readIndex];
     }
 }

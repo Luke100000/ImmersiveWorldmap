@@ -1,16 +1,14 @@
-package net.conczin.immersive_worldmap.lod;
+package net.conczin.immersive_worldmap.renderer;
+
+import net.conczin.immersive_worldmap.lod.ChunkLodProcessor;
 
 import java.util.LinkedHashMap;
 import java.util.Map;
 import java.util.concurrent.atomic.AtomicLong;
 
 
-public final class RenderStateManager {
-    private static final RenderStateManager INSTANCE = new RenderStateManager();
-
-    public static RenderStateManager get() {
-        return INSTANCE;
-    }
+public final class LodChunkMeshManager {
+    public static final LodChunkMeshManager INSTANCE = new LodChunkMeshManager();
 
     private static final AtomicLong currentTick = new AtomicLong(0);
 
@@ -19,10 +17,10 @@ public final class RenderStateManager {
     }
 
     private static final class Entry {
-        final RenderState state;
+        final LodChunkMesh state;
         volatile long lastAccessTick;
 
-        Entry(RenderState state, long tick) {
+        Entry(LodChunkMesh state, long tick) {
             this.state = state;
             this.lastAccessTick = tick;
         }
@@ -30,7 +28,7 @@ public final class RenderStateManager {
 
     private static final int MAX_CAPACITY = 4096;
 
-    // Access-order LRU; only evicts entries not accessed this tick.
+    // Access-order LRU; only evict entries not accessed this tick.
     private final Map<ChunkLodProcessor.CacheKey, Entry> cache = new LinkedHashMap<>(MAX_CAPACITY, 0.75f, true) {
         @Override
         protected boolean removeEldestEntry(Map.Entry<ChunkLodProcessor.CacheKey, Entry> eldest) {
@@ -38,21 +36,21 @@ public final class RenderStateManager {
         }
     };
 
-    private RenderStateManager() {
+    private LodChunkMeshManager() {
     }
 
-    public RenderState get(int cx, int cz, int lod, String dimension) {
-        ChunkLodProcessor.CacheKey k = new ChunkLodProcessor.CacheKey(cx, cz, dimension, lod);
+    public LodChunkMesh get(int cx, int cz, int lod, String dimension) {
+        ChunkLodProcessor.CacheKey key = new ChunkLodProcessor.CacheKey(cx, cz, dimension, lod);
         long tick = currentTick.get();
-        Entry entry = cache.get(k);
+        Entry entry = cache.get(key);
         if (entry != null) {
             entry.lastAccessTick = tick;
             return entry.state;
         }
-        RenderState rs = new RenderState(cx, cz, lod, dimension);
-        rs.requestLoad();
-        cache.put(k, new Entry(rs, tick));
-        return rs;
+        LodChunkMesh mesh = new LodChunkMesh(cx, cz, lod, dimension);
+        mesh.requestLoad();
+        cache.put(key, new Entry(mesh, tick));
+        return mesh;
     }
 
     public void clear() {

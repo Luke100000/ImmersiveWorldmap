@@ -12,7 +12,6 @@ public class DatabaseManager {
 
     /**
      * Initializes the database with the given path.
-     * This should be called once during mod initialization.
      *
      * @param databasePath the path where the SQLite database should be stored
      * @throws RuntimeException if an I/O error occurs while creating directories
@@ -49,8 +48,6 @@ public class DatabaseManager {
 
     /**
      * Checks if the database is initialized.
-     *
-     * @return true if initialized, false otherwise
      */
     public static boolean isInitialized() {
         return INSTANCE != null;
@@ -58,7 +55,6 @@ public class DatabaseManager {
 
     /**
      * Closes the database connection and cleans up resources.
-     * This should be called during mod shutdown.
      */
     public static void shutdown() {
         synchronized (LOCK) {

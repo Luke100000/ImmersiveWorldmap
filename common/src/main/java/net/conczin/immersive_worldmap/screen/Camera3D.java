@@ -54,7 +54,8 @@ public class Camera3D {
             // forward vector in XZ (toward screen top)
             float fwdX = -(float) Math.sin(yr);
             float fwdZ = (float) Math.cos(yr);
-            // right vector = rotate fwd 90 CW
+            // right vector = rotate fwd 90 CW: rigX = fwdZ, rigZ = -fwdX
+            float rigX = fwdZ;
             float rigZ = -fwdX;
             float speed = WASD_SPEED * smoothZoom;
 
@@ -67,11 +68,11 @@ public class Camera3D {
                 targetZ -= fwdZ * speed;
             }
             if (keyA) {
-                targetX -= fwdZ * speed;
+                targetX -= rigX * speed;
                 targetZ -= rigZ * speed;
             }
             if (keyD) {
-                targetX += fwdZ * speed;
+                targetX += rigX * speed;
                 targetZ += rigZ * speed;
             }
         }
@@ -81,8 +82,8 @@ public class Camera3D {
         targetYaw += velYaw;
         targetPitch += velPitch;
 
-        targetPitch = Math.max(PITCH_MIN, Math.min(PITCH_MAX, targetPitch));
-        targetZoom = Math.max(ZOOM_MIN, Math.min(ZOOM_MAX, targetZoom));
+        targetPitch = Math.clamp(targetPitch, PITCH_MIN, PITCH_MAX);
+        targetZoom = Math.clamp(targetZoom, ZOOM_MIN, ZOOM_MAX);
 
         velX *= decay;
         velZ *= decay;
@@ -140,7 +141,7 @@ public class Camera3D {
             float dYaw = dx * ROT_SENSITIVITY;
             float dPitch = dy * ROT_SENSITIVITY;
             targetYaw += dYaw;
-            targetPitch = Math.max(PITCH_MIN, Math.min(PITCH_MAX, targetPitch + dPitch));
+            targetPitch = Math.clamp(targetPitch + dPitch, PITCH_MIN, PITCH_MAX);
             velYaw = dYaw;
             velPitch = dPitch;
             return true;
@@ -154,7 +155,7 @@ public class Camera3D {
 
     public boolean mouseScrolled(double scrollY) {
         float factor = (scrollY > 0) ? (1f / 1.12f) : 1.12f;
-        targetZoom = Math.max(ZOOM_MIN, Math.min(ZOOM_MAX, targetZoom * factor));
+        targetZoom = Math.clamp(targetZoom * factor, ZOOM_MIN, ZOOM_MAX);
         return true;
     }
 
@@ -228,14 +229,15 @@ public class Camera3D {
     }
 
     public void setZoom(float zoom) {
-        targetZoom = smoothZoom = Math.max(ZOOM_MIN, Math.min(ZOOM_MAX, zoom));
+        targetZoom = smoothZoom = Math.clamp(zoom, ZOOM_MIN, ZOOM_MAX);
     }
 
     public void applyPan(float dx, float dy, int screenW, int screenH) {
         float yr = (float) Math.toRadians(smoothYaw);
         float cosY = (float) Math.cos(yr);
         float sinY = (float) Math.sin(yr);
-        float scale = smoothZoom / Math.min(screenW, screenH);
+        float cosPitch = Math.max(0.01f, Math.abs((float) Math.cos(Math.toRadians(smoothPitch))));
+        float scale = smoothZoom / (Math.min(screenW, screenH) * cosPitch);
 
         float worldDX = (dx * cosY + dy * sinY) * scale;
         float worldDZ = (-dx * sinY + dy * cosY) * scale;

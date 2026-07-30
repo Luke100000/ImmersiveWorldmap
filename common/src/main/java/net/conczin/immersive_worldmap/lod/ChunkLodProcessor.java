@@ -10,7 +10,6 @@ import java.sql.SQLException;
 import java.util.Collections;
 import java.util.LinkedHashMap;
 import java.util.Map;
-import java.util.Objects;
 import java.util.concurrent.ThreadPoolExecutor;
 
 /**
@@ -42,7 +41,7 @@ public class ChunkLodProcessor {
         EXECUTOR.submit(() -> processChunkSync(chunk));
     }
 
-    private static int getIdx(int height, int x, int y, int z) {
+    private static int getBlockIndex(int height, int x, int y, int z) {
         return (x * height * 16) + (y * 16) + z;
     }
 
@@ -72,7 +71,7 @@ public class ChunkLodProcessor {
                     for (int z = 0; z < 16; z++) {
                         int color = section.getBlockState(x, y, z).getBlock().defaultMapColor().id;
                         int ay = (sectionIndex * 16) + y;
-                        int blockIndex = getIdx(height, x, ay, z);
+                        int blockIndex = getBlockIndex(height, x, ay, z);
                         chunkData[blockIndex] = (byte) color;
                     }
                 }
@@ -96,16 +95,7 @@ public class ChunkLodProcessor {
         LOD_CACHE.remove(key);
     }
 
-    /**
-     * Retrieves chunk LOD data from the database.
-     *
-     * @param chunkX    chunk X coordinate
-     * @param chunkZ    chunk Z coordinate
-     * @param dimension dimension identifier
-     * @param lod       LOD level
-     * @return binary data, or null if not found
-     */
-    public static byte[] getChunkLodData(int chunkX, int chunkZ, String dimension, int lod) {
+    private static byte[] getLodBytes(int chunkX, int chunkZ, String dimension, int lod) {
         if (!DatabaseManager.isInitialized()) {
             return null;
         }
@@ -174,7 +164,7 @@ public class ChunkLodProcessor {
                                 freq[values[i]] = 0;
                             }
 
-                            result[getIdx(outHeight, cx * 8 + x, y, cz * 8 + z)] = modeVal;
+                            result[getBlockIndex(outHeight, cx * 8 + x, y, cz * 8 + z)] = modeVal;
                         }
                     }
                 }
@@ -202,30 +192,12 @@ public class ChunkLodProcessor {
             return cached;
         }
 
-        byte[] data = getChunkLodData(chunkX, chunkZ, dimension, lod);
+        byte[] data = getLodBytes(chunkX, chunkZ, dimension, lod);
         LodChunkData lodData = new LodChunkData(chunkX, chunkZ, dimension, lod, data);
         LOD_CACHE.put(key, lodData);
         return lodData;
     }
 
     public record CacheKey(int chunkX, int chunkZ, String dimension, int lod) {
-        @Override
-        public boolean equals(Object o) {
-            if (this == o) {
-                return true;
-            }
-            if (!(o instanceof CacheKey(int otherX, int otherZ, String otherDimension, int otherLod))) {
-                return false;
-            }
-            return chunkX == otherX
-                   && chunkZ == otherZ
-                   && lod == otherLod
-                   && Objects.equals(dimension, otherDimension);
-        }
-
-        @Override
-        public int hashCode() {
-            return Objects.hash(chunkX, chunkZ, dimension, lod);
-        }
     }
 }

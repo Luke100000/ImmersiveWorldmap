@@ -1,14 +1,16 @@
-package net.conczin.immersive_worldmap.lod;
+package net.conczin.immersive_worldmap.renderer;
 
 import com.mojang.blaze3d.systems.RenderSystem;
 import com.mojang.blaze3d.vertex.MeshData;
 import com.mojang.blaze3d.vertex.VertexBuffer;
+import net.conczin.immersive_worldmap.ImmersiveWorldmap;
+import net.conczin.immersive_worldmap.lod.ChunkLodProcessor;
 import net.minecraft.client.renderer.GameRenderer;
 import org.joml.Matrix4f;
 
 import java.util.concurrent.CompletableFuture;
 
-public class RenderState {
+public class LodChunkMesh {
     public final int chunkX;
     public final int chunkZ;
     public final int lod;
@@ -17,7 +19,7 @@ public class RenderState {
     private volatile MeshData mesh;
     private VertexBuffer vertexBuffer;
 
-    public RenderState(int chunkX, int chunkZ, int lod, String dimension) {
+    public LodChunkMesh(int chunkX, int chunkZ, int lod, String dimension) {
         this.chunkX = chunkX;
         this.chunkZ = chunkZ;
         this.lod = lod;
@@ -30,10 +32,10 @@ public class RenderState {
 
     public void requestLoad() {
         CompletableFuture.supplyAsync(
-                () -> LodChunkRenderer.buildMeshSync(chunkX, chunkZ, dimension, lod),
+                () -> LodChunkMeshBuilder.buildMeshSync(chunkX, chunkZ, dimension, lod),
                 ChunkLodProcessor.EXECUTOR
         ).thenAccept(result -> mesh = result).exceptionally(ex -> {
-            ex.printStackTrace();
+            ImmersiveWorldmap.LOGGER.error("Failed to load chunk LOD data: {}", ex.getMessage());
             return null;
         });
     }

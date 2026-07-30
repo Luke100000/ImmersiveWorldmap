@@ -2,8 +2,8 @@ package net.conczin.immersive_worldmap.screen;
 
 import com.mojang.blaze3d.systems.RenderSystem;
 import net.conczin.immersive_worldmap.lod.ChunkLodProcessor;
-import net.conczin.immersive_worldmap.lod.LodChunkRendererManager;
-import net.conczin.immersive_worldmap.lod.RenderState;
+import net.conczin.immersive_worldmap.renderer.LodChunkVisibilitySelector;
+import net.conczin.immersive_worldmap.renderer.LodChunkMesh;
 import net.minecraft.client.Minecraft;
 import net.minecraft.client.gui.GuiGraphics;
 import net.minecraft.client.gui.screens.Screen;
@@ -96,12 +96,12 @@ public class LodViewerScreen extends Screen {
             float eyeZ = camZ - (float) (Math.cos(yaw) * Math.cos(pitch)) * zoom;
 
             mv = new Matrix4f().lookAt(eyeX, eyeY, eyeZ, camX, 0, camZ, 0, 1, 0);
-            proj = new Matrix4f().setPerspective((float) Math.toRadians(60.0), (float) width / height, zoom * 0.01f, zoom * 10f);
+            proj = new Matrix4f().setPerspective((float) Math.toRadians(60.0), (float) width / height, zoom * 0.1f, zoom * 10f);
         }
 
-        LodChunkRendererManager.get().update(mv, proj, dimension);
+        LodChunkVisibilitySelector.get().update(mv, proj, dimension);
 
-        List<RenderState> visible = LodChunkRendererManager.get().visibleChunks();
+        List<LodChunkMesh> visible = LodChunkVisibilitySelector.get().visibleChunks();
 
         graphics.drawCenteredString(this.font, this.title, this.width / 2, 20, 0xFFFFFF);
         graphics.drawString(this.font, "Dimension: " + dimension, 20, 40, 0xFFFFFF);
@@ -122,7 +122,7 @@ public class LodViewerScreen extends Screen {
         RenderSystem.disableBlend();
         RenderSystem.enableCull();
 
-        for (RenderState rs : visible) {
+        for (LodChunkMesh rs : visible) {
             rs.draw(mv, proj);
         }
 
