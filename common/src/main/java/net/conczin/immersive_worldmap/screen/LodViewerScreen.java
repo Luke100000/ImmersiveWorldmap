@@ -1,11 +1,14 @@
 package net.conczin.immersive_worldmap.screen;
 
 import com.mojang.blaze3d.systems.RenderSystem;
+import net.conczin.immersive_worldmap.database.DatabaseManager;
 import net.conczin.immersive_worldmap.lod.ChunkLodProcessor;
+import net.conczin.immersive_worldmap.renderer.LodChunkMeshManager;
 import net.conczin.immersive_worldmap.renderer.LodChunkVisibilitySelector;
 import net.conczin.immersive_worldmap.renderer.LodChunkMesh;
 import net.minecraft.client.Minecraft;
 import net.minecraft.client.gui.GuiGraphics;
+import net.minecraft.client.gui.components.Button;
 import net.minecraft.client.gui.screens.Screen;
 import net.minecraft.core.BlockPos;
 import net.minecraft.network.chat.Component;
@@ -38,9 +41,26 @@ public class LodViewerScreen extends Screen {
     }
 
     @Override
+    protected void init() {
+        super.init();
+        addRenderableWidget(Button.builder(Component.literal("Clear database"), button -> clearDimension())
+                .bounds(this.width - 130, 20, 110, 20)
+                .build());
+    }
+
+    private void clearDimension() {
+        if (dimension == null || !DatabaseManager.isInitialized()) {
+            return;
+        }
+        ChunkLodProcessor.clearDimension(dimension);
+        LodChunkMeshManager.INSTANCE.clear();
+        LodChunkVisibilitySelector.reset();
+    }
+
+    @Override
     public boolean mouseClicked(double mouseX, double mouseY, int button) {
-        if (camera.mouseClicked(mouseX, mouseY, button)) return true;
-        return super.mouseClicked(mouseX, mouseY, button);
+        if (super.mouseClicked(mouseX, mouseY, button)) return true;
+        return camera.mouseClicked(mouseX, mouseY, button);
     }
 
     @Override

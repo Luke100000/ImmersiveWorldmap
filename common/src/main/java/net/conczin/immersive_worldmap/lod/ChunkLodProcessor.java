@@ -37,6 +37,21 @@ public class ChunkLodProcessor {
         EXECUTOR.shutdownNow();
     }
 
+    public static void clearDimension(String dimension) {
+        if (!DatabaseManager.isInitialized()) {
+            return;
+        }
+
+        try {
+            DatabaseManager.getInstance().clearDimension(dimension);
+            synchronized (LOD_CACHE) {
+                LOD_CACHE.keySet().removeIf(key -> key.dimension().equals(dimension) && key.lod() > 0);
+            }
+        } catch (SQLException e) {
+            ImmersiveWorldmap.LOGGER.warn("Failed to delete generated LOD data: {}", e.getMessage());
+        }
+    }
+
     public static void processChunk(LevelChunk chunk) {
         EXECUTOR.submit(() -> processChunkSync(chunk));
     }

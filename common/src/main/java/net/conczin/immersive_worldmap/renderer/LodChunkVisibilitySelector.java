@@ -1,7 +1,10 @@
 package net.conczin.immersive_worldmap.renderer;
 
 import net.conczin.immersive_worldmap.util.FrustumChunkIterator;
+import org.joml.FrustumIntersection;
 import org.joml.Matrix4f;
+import org.joml.Vector3f;
+import org.joml.Vector4f;
 
 import java.util.ArrayList;
 import java.util.List;
@@ -27,11 +30,18 @@ public class LodChunkVisibilitySelector {
     private static final float CHUNK_HEIGHT = 384f;
     private static final int CHUNK_SIZE = 16;
 
+    private static final float SEA_LEVEL = 0f;
     private static final float SUBDIVIDE_DISTANCE_FACTOR = 2f;
+    private static final float MIN_FORWARD_Y = 1.0e-4f;
 
-    private record CameraSnapshot(Matrix4f mv, Matrix4f proj, String dimension, float camX, float camY, float camZ) {
+    private record CameraSnapshot(
+            Matrix4f viewProjection,
+            String dimension,
+            float focusX,
+            float focusZ,
+            int rootSearchRadius
+    ) {
     }
-
 
     private final AtomicReference<CameraSnapshot> pendingSnapshot = new AtomicReference<>(null);
 
@@ -77,54 +87,95 @@ public class LodChunkVisibilitySelector {
 
     private List<LodChunkMesh> buildVisibleList(CameraSnapshot snapshot) {
         List<LodChunkMesh> result = new ArrayList<>();
-        FrustumChunkIterator topLevel = new FrustumChunkIterator(snapshot.mv(), snapshot.proj(), CHUNK_SIZE * (1 << TOP_LOD), CHUNK_HEIGHT);
+        float topLevelSize = CHUNK_SIZE * (1 << TOP_LOD);
+        FrustumIntersection frustum = new FrustumIntersection(snapshot.viewProjection());
+        FrustumChunkIterator topLevel = new FrustumChunkIterator(
+                snapshot.viewProjection(), topLevelSize, CHUNK_HEIGHT,
+                snapshot.focusX(), snapshot.focusZ(), snapshot.rootSearchRadius()
+        );
         while (topLevel.hasNext()) {
             int[] c = topLevel.next();
-            traverse(c[0], c[1], TOP_LOD, snapshot, result);
+            traverse(c[0], c[1], TOP_LOD, snapshot, frustum, result);
         }
         return result;
     }
 
-    private LodChunkMesh traverse(int cx, int cz, int lod, CameraSnapshot snapshot, List<LodChunkMesh> result) {
+    private boolean traverse(
+            int cx,
+            int cz,
+            int lod,
+            CameraSnapshot snapshot,
+            FrustumIntersection frustum,
+            List<LodChunkMesh> result
+    ) {
+        float worldSize = CHUNK_SIZE * (1 << lod);
+        if (!frustum.testAab(cx * worldSize, 0f, cz * worldSize,
+                (cx + 1) * worldSize, CHUNK_HEIGHT, (cz + 1) * worldSize)) {
+            return true;
+        }
+
         LodChunkMesh self = LodChunkMeshManager.INSTANCE.get(cx, cz, lod, snapshot.dimension());
         if (lod == 0 || !shouldSubdivide(cx, cz, lod, snapshot)) {
             result.add(self);
-            return self;
+            return self.isLoaded();
         }
 
         int childLod = lod - 1, baseCx = cx * 2, baseCz = cz * 2;
         List<LodChunkMesh> childResult = new ArrayList<>(4);
-        LodChunkMesh r0 = traverse(baseCx, baseCz, childLod, snapshot, childResult);
-        LodChunkMesh r1 = traverse(baseCx + 1, baseCz, childLod, snapshot, childResult);
-        LodChunkMesh r2 = traverse(baseCx, baseCz + 1, childLod, snapshot, childResult);
-        LodChunkMesh r3 = traverse(baseCx + 1, baseCz + 1, childLod, snapshot, childResult);
+        boolean childrenReady = traverse(baseCx, baseCz, childLod, snapshot, frustum, childResult)
+                                & traverse(baseCx + 1, baseCz, childLod, snapshot, frustum, childResult)
+                                & traverse(baseCx, baseCz + 1, childLod, snapshot, frustum, childResult)
+                                & traverse(baseCx + 1, baseCz + 1, childLod, snapshot, frustum, childResult);
 
-        if (r0.isLoaded() && r1.isLoaded() && r2.isLoaded() && r3.isLoaded()) {
+        if (childrenReady || !self.isLoaded()) {
             result.addAll(childResult);
+            return childrenReady;
         } else {
             result.add(self);
+            return self.isLoaded();
         }
-        return self;
     }
 
     private boolean shouldSubdivide(int cx, int cz, int lod, CameraSnapshot snap) {
         float worldSize = CHUNK_SIZE * (1 << lod);
-        float centX = (cx + 0.5f) * worldSize;
-        float centY = CHUNK_HEIGHT * 0.5f;
-        float centZ = (cz + 0.5f) * worldSize;
-        float dx = snap.camX() - centX;
-        float dy = snap.camY() - centY;
-        float dz = snap.camZ() - centZ;
-        float dist = (float) Math.sqrt(dx * dx + dy * dy + dz * dz);
-        return dist < worldSize * SUBDIVIDE_DISTANCE_FACTOR * 8.0;
+        float minX = cx * worldSize;
+        float minZ = cz * worldSize;
+        float nearestX = Math.clamp(snap.focusX(), minX, minX + worldSize);
+        float nearestZ = Math.clamp(snap.focusZ(), minZ, minZ + worldSize);
+        float dx = snap.focusX() - nearestX;
+        float dz = snap.focusZ() - nearestZ;
+        return dx * dx + dz * dz < worldSize * worldSize * SUBDIVIDE_DISTANCE_FACTOR * SUBDIVIDE_DISTANCE_FACTOR;
     }
 
     public void update(Matrix4f mv, Matrix4f proj, String dimension) {
-        Matrix4f mvCopy = new Matrix4f(mv);
-        float camX = -(mvCopy.m00() * mvCopy.m30() + mvCopy.m10() * mvCopy.m31() + mvCopy.m20() * mvCopy.m32());
-        float camY = -(mvCopy.m01() * mvCopy.m30() + mvCopy.m11() * mvCopy.m31() + mvCopy.m21() * mvCopy.m32());
-        float camZ = -(mvCopy.m02() * mvCopy.m30() + mvCopy.m12() * mvCopy.m31() + mvCopy.m22() * mvCopy.m32());
-        pendingSnapshot.set(new CameraSnapshot(mvCopy, new Matrix4f(proj), dimension, camX, camY, camZ));
+        Matrix4f inverseView = new Matrix4f(mv).invert();
+        Vector3f eye = inverseView.transformPosition(new Vector3f());
+        Vector3f forward = inverseView.transformDirection(new Vector3f(0f, 0f, -1f));
+        float distanceToSeaLevel = Math.abs(forward.y) > MIN_FORWARD_Y ? (SEA_LEVEL - eye.y) / forward.y : 0f;
+        float focusX = eye.x + forward.x * Math.max(0f, distanceToSeaLevel);
+        float focusZ = eye.z + forward.z * Math.max(0f, distanceToSeaLevel);
+
+        Matrix4f viewProjection = new Matrix4f(proj).mul(mv);
+        pendingSnapshot.set(new CameraSnapshot(viewProjection, dimension, focusX, focusZ,
+                rootSearchRadius(viewProjection, focusX, focusZ)));
+    }
+
+    private int rootSearchRadius(Matrix4f viewProjection, float focusX, float focusZ) {
+        Matrix4f inverseViewProjection = new Matrix4f(viewProjection).invert();
+        float maxDistanceSquared = 0f;
+        for (int x = -1; x <= 1; x += 2) {
+            for (int z = -1; z <= 1; z += 2) {
+                Vector4f farCorner = inverseViewProjection.transform(new Vector4f(x, z, 1f, 1f));
+                if (Math.abs(farCorner.w) < 1.0e-6f) continue;
+                float worldX = farCorner.x / farCorner.w;
+                float worldZ = farCorner.z / farCorner.w;
+                float dx = worldX - focusX;
+                float dz = worldZ - focusZ;
+                maxDistanceSquared = Math.max(maxDistanceSquared, dx * dx + dz * dz);
+            }
+        }
+        float topLevelSize = CHUNK_SIZE * (1 << TOP_LOD);
+        return Math.max(1, (int) Math.ceil(Math.sqrt(maxDistanceSquared) / topLevelSize) + 1);
     }
 
     public List<LodChunkMesh> visibleChunks() {

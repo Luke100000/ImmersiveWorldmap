@@ -140,8 +140,8 @@ public class Camera3D {
         if (isDraggingRotation && button == 0) {
             float dYaw = dx * ROT_SENSITIVITY;
             float dPitch = dy * ROT_SENSITIVITY;
-            targetYaw += dYaw;
-            targetPitch = Math.clamp(targetPitch + dPitch, PITCH_MIN, PITCH_MAX);
+            targetYaw -= dYaw;
+            targetPitch = Math.clamp(targetPitch - dPitch, PITCH_MIN, PITCH_MAX);
             velYaw = dYaw;
             velPitch = dPitch;
             return true;
