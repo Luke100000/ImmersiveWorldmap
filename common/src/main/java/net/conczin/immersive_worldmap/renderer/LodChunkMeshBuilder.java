@@ -6,6 +6,8 @@ import net.conczin.immersive_worldmap.lod.LodChunkData;
 import net.conczin.immersive_worldmap.util.ColorManager;
 import net.conczin.immersive_worldmap.util.TesselatorPool;
 
+import java.util.concurrent.CompletableFuture;
+
 /**
  * Renders LOD chunk data as a mesh.
  * Uses greedy meshing to build optimized geometry from voxel data.
@@ -22,16 +24,19 @@ public class LodChunkMeshBuilder {
      * @return CompletableFuture that will contain the built mesh data, or null if no data exists
      */
     @SuppressWarnings("DuplicatedCode")
-    public static MeshData buildMeshSync(int chunkX, int chunkZ, String dimension, int lod) {
-        LodChunkData center = ChunkLodProcessor.getLodChunkData(chunkX, chunkZ, dimension, lod);
-        if (center.empty()) {
-            return null;
-        }
+    public static CompletableFuture<MeshData> buildMeshAsync(int chunkX, int chunkZ, String dimension, int lod) {
+        CompletableFuture<LodChunkData> center = ChunkLodProcessor.getLodChunkDataAsync(chunkX, chunkZ, dimension, lod);
+        CompletableFuture<LodChunkData> north = ChunkLodProcessor.getLodChunkDataAsync(chunkX, chunkZ - 1, dimension, lod);
+        CompletableFuture<LodChunkData> south = ChunkLodProcessor.getLodChunkDataAsync(chunkX, chunkZ + 1, dimension, lod);
+        CompletableFuture<LodChunkData> west = ChunkLodProcessor.getLodChunkDataAsync(chunkX - 1, chunkZ, dimension, lod);
+        CompletableFuture<LodChunkData> east = ChunkLodProcessor.getLodChunkDataAsync(chunkX + 1, chunkZ, dimension, lod);
+        return CompletableFuture.allOf(center, north, south, west, east).thenCompose(ignored ->
+                ChunkLodProcessor.EXECUTOR.submit(lod, () -> buildMesh(center.join(), north.join(), south.join(), west.join(), east.join())));
+    }
 
-        LodChunkData north = ChunkLodProcessor.getLodChunkData(chunkX, chunkZ - 1, dimension, lod);
-        LodChunkData south = ChunkLodProcessor.getLodChunkData(chunkX, chunkZ + 1, dimension, lod);
-        LodChunkData west = ChunkLodProcessor.getLodChunkData(chunkX - 1, chunkZ, dimension, lod);
-        LodChunkData east = ChunkLodProcessor.getLodChunkData(chunkX + 1, chunkZ, dimension, lod);
+    @SuppressWarnings("DuplicatedCode")
+    private static MeshData buildMesh(LodChunkData center, LodChunkData north, LodChunkData south, LodChunkData west, LodChunkData east) {
+        if (center.empty()) return null;
 
         Tesselator tesselator = TesselatorPool.acquire();
         try {

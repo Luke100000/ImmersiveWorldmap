@@ -31,7 +31,7 @@ public class LodChunkVisibilitySelector {
     private static final int CHUNK_SIZE = 16;
 
     private static final float SEA_LEVEL = 0f;
-    private static final float SUBDIVIDE_DISTANCE_FACTOR = 2f;
+    private static final float SUBDIVIDE_DISTANCE_FACTOR = 8f;
     private static final float MIN_FORWARD_Y = 1.0e-4f;
 
     private record CameraSnapshot(

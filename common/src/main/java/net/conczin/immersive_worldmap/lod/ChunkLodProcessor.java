@@ -3,20 +3,23 @@ package net.conczin.immersive_worldmap.lod;
 import net.conczin.immersive_worldmap.ImmersiveWorldmap;
 import net.conczin.immersive_worldmap.database.DatabaseManager;
 import net.conczin.immersive_worldmap.util.ThreadPoolUtil;
+import net.conczin.immersive_worldmap.util.PriorityThreadPoolExecutor;
 import net.minecraft.world.level.chunk.LevelChunk;
 import net.minecraft.world.level.chunk.LevelChunkSection;
 
 import java.sql.SQLException;
 import java.util.Collections;
 import java.util.LinkedHashMap;
+import java.util.List;
 import java.util.Map;
-import java.util.concurrent.ThreadPoolExecutor;
+import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.ConcurrentHashMap;
 
 /**
  * Processes chunks and generates LODs.
  */
 public class ChunkLodProcessor {
-    public static ThreadPoolExecutor EXECUTOR;
+    public static PriorityThreadPoolExecutor EXECUTOR;
 
     private static final int LOD_CACHE_SIZE = 256;
     private static final Map<CacheKey, LodChunkData> LOD_CACHE = Collections.synchronizedMap(
@@ -27,10 +30,12 @@ public class ChunkLodProcessor {
                 }
             }
     );
+    private static final Map<CacheKey, CompletableFuture<LodChunkData>> IN_FLIGHT = new ConcurrentHashMap<>();
 
     public static void start() {
         EXECUTOR = ThreadPoolUtil.createLowPriorityFixedThreadPool("ImmersiveWorldmap");
         LOD_CACHE.clear();
+        IN_FLIGHT.clear();
     }
 
     public static void shutdown() {
@@ -53,7 +58,10 @@ public class ChunkLodProcessor {
     }
 
     public static void processChunk(LevelChunk chunk) {
-        EXECUTOR.submit(() -> processChunkSync(chunk));
+        EXECUTOR.submit(0, () -> {
+            processChunkSync(chunk);
+            return null;
+        });
     }
 
     private static int getBlockIndex(int height, int x, int y, int z) {
@@ -110,34 +118,45 @@ public class ChunkLodProcessor {
         LOD_CACHE.remove(key);
     }
 
-    private static byte[] getLodBytes(int chunkX, int chunkZ, String dimension, int lod) {
-        if (!DatabaseManager.isInitialized()) {
-            return null;
-        }
-
-        try {
-            byte[] chunkColors = DatabaseManager.getInstance().getChunkColors(chunkX, chunkZ, dimension, lod);
-            if (chunkColors != null) {
-                return chunkColors;
+    private static CompletableFuture<LodChunkData> loadLodAsync(CacheKey key) {
+        return EXECUTOR.submit(key.lod(), () -> loadStoredLod(key)).thenCompose(stored -> {
+            if (stored != null || key.lod() == 0) {
+                return CompletableFuture.completedFuture(new LodChunkData(key.chunkX(), key.chunkZ(), key.dimension(), key.lod(), stored));
             }
-        } catch (SQLException e) {
-            ImmersiveWorldmap.LOGGER.warn("Failed to retrieve chunk LOD data: {}", e.getMessage());
-        }
-
-        if (lod > 0) {
-            return generateLod(chunkX, chunkZ, dimension, lod);
-        }
-
-        return null;
+            return generateLodAsync(key);
+        });
     }
 
-    private static byte[] generateLod(int chunkX, int chunkZ, String dimension, int lod) {
-        // Fetch the fixed 2x2 grid of source chunks from the previous LOD level
-        int baseX = chunkX * 2;
-        int baseZ = chunkZ * 2;
-        LodChunkData base = getLodChunkData(baseX, baseZ, dimension, lod - 1);
+    private static byte[] loadStoredLod(CacheKey key) {
+        if (!DatabaseManager.isInitialized()) return null;
+        try {
+            return DatabaseManager.getInstance().getChunkColors(key.chunkX(), key.chunkZ(), key.dimension(), key.lod());
+        } catch (SQLException e) {
+            ImmersiveWorldmap.LOGGER.warn("Failed to retrieve chunk LOD data: {}", e.getMessage());
+            return null;
+        }
+    }
 
-        int outHeight = Math.max(1, base.getHeight() / 2); // TODO can be removed to remove base
+    private static CompletableFuture<LodChunkData> generateLodAsync(CacheKey key) {
+        int baseX = key.chunkX() * 2;
+        int baseZ = key.chunkZ() * 2;
+        List<CompletableFuture<LodChunkData>> sources = List.of(
+                getLodChunkDataAsync(baseX, baseZ, key.dimension(), key.lod() - 1),
+                getLodChunkDataAsync(baseX + 1, baseZ, key.dimension(), key.lod() - 1),
+                getLodChunkDataAsync(baseX, baseZ + 1, key.dimension(), key.lod() - 1),
+                getLodChunkDataAsync(baseX + 1, baseZ + 1, key.dimension(), key.lod() - 1)
+        );
+        return CompletableFuture.allOf(sources.toArray(CompletableFuture[]::new)).thenCompose(ignored -> EXECUTOR.submit(key.lod(), () -> {
+            LodChunkData[][] data = {{sources.get(0).join(), sources.get(2).join()}, {sources.get(1).join(), sources.get(3).join()}};
+            byte[] result = generateLod(data);
+            upsertChunkData(key.chunkX(), key.chunkZ(), key.dimension(), key.lod(), result);
+            return new LodChunkData(key.chunkX(), key.chunkZ(), key.dimension(), key.lod(), result);
+        }));
+    }
+
+    private static byte[] generateLod(LodChunkData[][] sources) {
+        // Fetch the fixed 2x2 grid of source chunks from the previous LOD level
+        int outHeight = Math.max(1, sources[0][0].getHeight() / 2);
         byte[] result = new byte[16 * outHeight * 16];
 
         int[] freq = new int[256];
@@ -146,7 +165,7 @@ public class ChunkLodProcessor {
         // For all 4 parent chunks
         for (int cx = 0; cx < 2; cx++) {
             for (int cz = 0; cz < 2; cz++) {
-                LodChunkData src = getLodChunkData(baseX + cx, baseZ + cz, dimension, lod - 1);
+                LodChunkData src = sources[cx][cz];
                 if (src.empty()) continue;
 
                 // And over all output bytes
@@ -186,8 +205,6 @@ public class ChunkLodProcessor {
             }
         }
 
-        upsertChunkData(chunkX, chunkZ, dimension, lod, result);
-
         return result;
     }
 
@@ -200,17 +217,20 @@ public class ChunkLodProcessor {
      * @param lod       LOD level
      * @return LodChunkData record, or null if not found
      */
-    public static LodChunkData getLodChunkData(int chunkX, int chunkZ, String dimension, int lod) {
+    public static CompletableFuture<LodChunkData> getLodChunkDataAsync(int chunkX, int chunkZ, String dimension, int lod) {
         CacheKey key = new CacheKey(chunkX, chunkZ, dimension, lod);
-        LodChunkData cached = LOD_CACHE.get(key);
-        if (cached != null) {
-            return cached;
+        synchronized (LOD_CACHE) {
+            LodChunkData cached = LOD_CACHE.get(key);
+            if (cached != null) return CompletableFuture.completedFuture(cached);
         }
-
-        byte[] data = getLodBytes(chunkX, chunkZ, dimension, lod);
-        LodChunkData lodData = new LodChunkData(chunkX, chunkZ, dimension, lod, data);
-        LOD_CACHE.put(key, lodData);
-        return lodData;
+        return IN_FLIGHT.computeIfAbsent(key, currentKey -> {
+            CompletableFuture<LodChunkData> future = loadLodAsync(currentKey);
+            future.whenComplete((data, error) -> {
+                if (error == null) LOD_CACHE.put(currentKey, data);
+                IN_FLIGHT.remove(currentKey, future);
+            });
+            return future;
+        });
     }
 
     public record CacheKey(int chunkX, int chunkZ, String dimension, int lod) {
