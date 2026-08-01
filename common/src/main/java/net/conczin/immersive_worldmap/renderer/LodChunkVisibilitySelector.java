@@ -39,6 +39,9 @@ public class LodChunkVisibilitySelector {
             String dimension,
             float focusX,
             float focusZ,
+            float cameraX,
+            float cameraY,
+            float cameraZ,
             int rootSearchRadius
     ) {
     }
@@ -136,15 +139,15 @@ public class LodChunkVisibilitySelector {
         }
     }
 
-    private boolean shouldSubdivide(int cx, int cz, int lod, CameraSnapshot snap) {
+    private boolean shouldSubdivide(int cx, int cz, int lod, CameraSnapshot snapshot) {
         float worldSize = CHUNK_SIZE * (1 << lod);
-        float minX = cx * worldSize;
-        float minZ = cz * worldSize;
-        float nearestX = Math.clamp(snap.focusX(), minX, minX + worldSize);
-        float nearestZ = Math.clamp(snap.focusZ(), minZ, minZ + worldSize);
-        float dx = snap.focusX() - nearestX;
-        float dz = snap.focusZ() - nearestZ;
-        return dx * dx + dz * dz < worldSize * worldSize * SUBDIVIDE_DISTANCE_FACTOR * SUBDIVIDE_DISTANCE_FACTOR;
+        float centerX = (cx + 0.5f) * worldSize;
+        float centerY = CHUNK_HEIGHT * 0.5f;
+        float centerZ = (cz + 0.5f) * worldSize;
+        float dx = snapshot.cameraX() - centerX;
+        float dy = snapshot.cameraY() - centerY;
+        float dz = snapshot.cameraZ() - centerZ;
+        return dx * dx + dy * dy + dz * dz < worldSize * worldSize * SUBDIVIDE_DISTANCE_FACTOR * SUBDIVIDE_DISTANCE_FACTOR;
     }
 
     public void update(Matrix4f mv, Matrix4f proj, String dimension) {
@@ -157,7 +160,7 @@ public class LodChunkVisibilitySelector {
 
         Matrix4f viewProjection = new Matrix4f(proj).mul(mv);
         pendingSnapshot.set(new CameraSnapshot(viewProjection, dimension, focusX, focusZ,
-                rootSearchRadius(viewProjection, focusX, focusZ)));
+                eye.x, eye.y, eye.z, rootSearchRadius(viewProjection, focusX, focusZ)));
     }
 
     private int rootSearchRadius(Matrix4f viewProjection, float focusX, float focusZ) {

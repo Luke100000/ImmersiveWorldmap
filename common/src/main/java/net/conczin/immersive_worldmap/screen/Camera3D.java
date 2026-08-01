@@ -142,8 +142,8 @@ public class Camera3D {
             float dPitch = dy * ROT_SENSITIVITY;
             targetYaw -= dYaw;
             targetPitch = Math.clamp(targetPitch - dPitch, PITCH_MIN, PITCH_MAX);
-            velYaw = dYaw;
-            velPitch = dPitch;
+            velYaw = -dYaw;
+            velPitch = -dPitch;
             return true;
         }
         if (isDraggingPan && button == 1) {

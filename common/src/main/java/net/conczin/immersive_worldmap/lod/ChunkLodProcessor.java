@@ -137,7 +137,7 @@ public class ChunkLodProcessor {
         int baseZ = chunkZ * 2;
         LodChunkData base = getLodChunkData(baseX, baseZ, dimension, lod - 1);
 
-        int outHeight = Math.max(1, base.getHeight() / 2);
+        int outHeight = Math.max(1, base.getHeight() / 2); // TODO can be removed to remove base
         byte[] result = new byte[16 * outHeight * 16];
 
         int[] freq = new int[256];
