@@ -8,6 +8,7 @@ import net.minecraft.client.renderer.GameRenderer;
 import org.joml.Matrix4f;
 
 import java.util.concurrent.CancellationException;
+import java.util.concurrent.atomic.AtomicLong;
 
 public class LodChunkMesh {
     public final int chunkX;
@@ -16,7 +17,11 @@ public class LodChunkMesh {
     public final String dimension;
 
     private volatile MeshData mesh;
+    private volatile MeshData pendingMesh;
+    private volatile boolean pendingMeshReady;
+    private volatile boolean dirty = true;
     private volatile boolean requested;
+    private final AtomicLong revision = new AtomicLong();
     private VertexBuffer vertexBuffer;
 
     public LodChunkMesh(int chunkX, int chunkZ, int lod, String dimension) {
@@ -31,16 +36,24 @@ public class LodChunkMesh {
     }
 
     public void requestLoad() {
-        if (requested) return;
+        if (requested || !dirty) return;
         requested = true;
+        long requestedRevision = revision.get();
         LodChunkMeshBuilder.buildMeshAsync(chunkX, chunkZ, dimension, lod).whenComplete((result, error) -> {
-            if (error == null) {
-                mesh = result;
-            } else if (!isCancellation(error)) {
+            if (error == null && revision.get() == requestedRevision) {
+                pendingMesh = result;
+                pendingMeshReady = true;
+                dirty = false;
+            } else if (error != null && !isCancellation(error)) {
                 ImmersiveWorldmap.LOGGER.error("Failed to load chunk LOD data: {}", error.getMessage());
             }
-            if (error != null) requested = false;
+            requested = false;
         });
+    }
+
+    public void markDirty() {
+        revision.incrementAndGet();
+        dirty = true;
     }
 
     private static boolean isCancellation(Throwable error) {
@@ -53,6 +66,15 @@ public class LodChunkMesh {
 
     // Must be called from the render thread.
     public void draw(Matrix4f mv, Matrix4f proj) {
+        if (pendingMeshReady) {
+            if (vertexBuffer != null) {
+                vertexBuffer.close();
+                vertexBuffer = null;
+            }
+            mesh = pendingMesh;
+            pendingMesh = null;
+            pendingMeshReady = false;
+        }
         if (mesh == null) return;
         if (vertexBuffer == null) {
             vertexBuffer = new VertexBuffer(VertexBuffer.Usage.STATIC);
@@ -77,8 +99,11 @@ public class LodChunkMesh {
     }
 
     public void close() {
-        // TODO
         mesh = null;
+        pendingMesh = null;
+        pendingMeshReady = false;
+        dirty = true;
+        requested = false;
         if (vertexBuffer != null) {
             vertexBuffer.close();
             vertexBuffer = null;

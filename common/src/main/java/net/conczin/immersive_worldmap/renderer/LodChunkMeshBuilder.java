@@ -10,7 +10,6 @@ import java.util.concurrent.CompletableFuture;
 
 /**
  * Renders LOD chunk data as a mesh.
- * Uses greedy meshing to build optimized geometry from voxel data.
  */
 public class LodChunkMeshBuilder {
     /**

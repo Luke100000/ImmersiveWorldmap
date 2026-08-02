@@ -1,6 +1,5 @@
 package net.conczin.immersive_worldmap.renderer;
 
-import com.mojang.blaze3d.systems.RenderSystem;
 import net.conczin.immersive_worldmap.lod.ChunkLodProcessor;
 
 import java.util.LinkedHashMap;
@@ -61,9 +60,9 @@ public final class LodChunkMeshManager {
     }
 
     public void invalidate(int cx, int cz, int lod, String dimension) {
-        Entry entry = cache.remove(new ChunkLodProcessor.CacheKey(cx, cz, dimension, lod));
+        Entry entry = cache.get(new ChunkLodProcessor.CacheKey(cx, cz, dimension, lod));
         if (entry != null) {
-            RenderSystem.recordRenderCall(entry.state::close);
+            entry.state.markDirty();
         }
     }
 }
