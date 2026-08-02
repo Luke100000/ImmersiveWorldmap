@@ -236,8 +236,7 @@ public class Camera3D {
         float yr = (float) Math.toRadians(smoothYaw);
         float cosY = (float) Math.cos(yr);
         float sinY = (float) Math.sin(yr);
-        float cosPitch = Math.max(0.01f, Math.abs((float) Math.cos(Math.toRadians(smoothPitch))));
-        float scale = smoothZoom / (Math.min(screenW, screenH) * cosPitch);
+        float scale = smoothZoom / (Math.min(screenW, screenH));
 
         float worldDX = (dx * cosY + dy * sinY) * scale;
         float worldDZ = (-dx * sinY + dy * cosY) * scale;

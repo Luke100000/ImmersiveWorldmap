@@ -44,6 +44,9 @@ public class LodViewerScreen extends Screen {
     protected void init() {
         super.init();
         addRenderableWidget(Button.builder(Component.literal("Clear database"), button -> clearDimension())
+                .bounds(this.width - 250, 20, 110, 20)
+                .build());
+        addRenderableWidget(Button.builder(Component.literal("Clear meshes"), button -> clearMeshes())
                 .bounds(this.width - 130, 20, 110, 20)
                 .build());
     }
@@ -53,6 +56,11 @@ public class LodViewerScreen extends Screen {
             return;
         }
         ChunkLodProcessor.clearDimension(dimension);
+        LodChunkMeshManager.INSTANCE.clear();
+        LodChunkVisibilitySelector.reset();
+    }
+
+    private void clearMeshes() {
         LodChunkMeshManager.INSTANCE.clear();
         LodChunkVisibilitySelector.reset();
     }
@@ -125,7 +133,8 @@ public class LodViewerScreen extends Screen {
 
         graphics.drawCenteredString(this.font, this.title, this.width / 2, 20, 0xFFFFFF);
         graphics.drawString(this.font, "Dimension: " + dimension, 20, 40, 0xFFFFFF);
-        graphics.drawString(this.font, "Tasks: " + ChunkLodProcessor.EXECUTOR.getQueue().size(), 20, 52, 0xFFFFFF);
+        graphics.drawString(this.font, "Tasks: " + ChunkLodProcessor.EXECUTOR.getProcessedTasks()
+                + " / " + ChunkLodProcessor.EXECUTOR.getTotalTasks(), 20, 52, 0xFFFFFF);
         graphics.drawString(this.font, "Visible chunks: " + visible.size(), 20, 64, 0xFFFFFF);
         graphics.drawString(this.font,
                 String.format("Zoom: %.1f  Yaw: %.1f  Pitch: %.1f",

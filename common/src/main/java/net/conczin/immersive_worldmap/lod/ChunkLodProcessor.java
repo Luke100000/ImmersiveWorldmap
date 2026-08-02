@@ -2,6 +2,7 @@ package net.conczin.immersive_worldmap.lod;
 
 import net.conczin.immersive_worldmap.ImmersiveWorldmap;
 import net.conczin.immersive_worldmap.database.DatabaseManager;
+import net.conczin.immersive_worldmap.renderer.LodChunkMeshManager;
 import net.conczin.immersive_worldmap.util.ThreadPoolUtil;
 import net.conczin.immersive_worldmap.util.PriorityThreadPoolExecutor;
 import net.minecraft.world.level.chunk.LevelChunk;
@@ -127,6 +128,7 @@ public class ChunkLodProcessor {
             DatabaseManager.getInstance().upsertChunk(chunkX, chunkZ, dimension, lod, data);
             clearLodCacheForLevel(chunkX, chunkZ, dimension, lod);
             clearParentLodCache(chunkX, chunkZ, dimension, lod);
+            LodChunkMeshManager.INSTANCE.invalidate(chunkX, chunkZ, lod, dimension);
         } catch (SQLException e) {
             ImmersiveWorldmap.LOGGER.warn("Failed to store chunk LOD data: {}", e.getMessage());
         }
