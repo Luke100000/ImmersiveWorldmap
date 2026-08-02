@@ -336,6 +336,10 @@ public class ChunkLodProcessor {
         EXECUTOR.discardQueuedTasksOutside(tag -> tag instanceof CacheKey key && isCoveredByViewport(key, visibleKeys));
     }
 
+    public static void clearQueuedViewportTasks() {
+        EXECUTOR.discardQueuedTasksOutside(tag -> false);
+    }
+
     public static int getCacheSize() {
         return LOD_CACHE.size();
     }

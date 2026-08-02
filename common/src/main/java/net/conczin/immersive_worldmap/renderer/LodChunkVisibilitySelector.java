@@ -4,8 +4,6 @@ import net.conczin.immersive_worldmap.lod.ChunkLodProcessor;
 import net.conczin.immersive_worldmap.util.CircularChunkIterator;
 import org.joml.FrustumIntersection;
 import org.joml.Matrix4f;
-import org.joml.Vector3f;
-import org.joml.Vector4f;
 
 import java.util.ArrayList;
 import java.util.HashSet;
@@ -33,9 +31,7 @@ public class LodChunkVisibilitySelector {
     private static final float CHUNK_HEIGHT = 384f;
     private static final int CHUNK_SIZE = 16;
 
-    private static final double SEA_LEVEL = 0;
     private static final double SUBDIVIDE_DISTANCE_FACTOR = 16;
-    private static final double MIN_FORWARD_Y = 1.0e-4;
     private static final double LOG_2 = Math.log(2.0);
 
     private record CameraSnapshot(
@@ -43,9 +39,7 @@ public class LodChunkVisibilitySelector {
             String dimension,
             double focusX,
             double focusZ,
-            double cameraX,
-            float cameraY,
-            float cameraZ
+            float zoom
     ) {
     }
 
@@ -99,7 +93,7 @@ public class LodChunkVisibilitySelector {
         int centerX = (int) Math.floor(snapshot.focusX() / worldSize);
         int centerZ = (int) Math.floor(snapshot.focusZ() / worldSize);
 
-        CircularChunkIterator chunks = new CircularChunkIterator(centerX, centerZ, 16);
+        CircularChunkIterator chunks = new CircularChunkIterator(centerX, centerZ, 4);
         while (chunks.hasNext()) {
             int[] chunk = chunks.next();
             int chunkX = chunk[0];
@@ -117,11 +111,7 @@ public class LodChunkVisibilitySelector {
     }
 
     private int selectLod(CameraSnapshot snapshot) {
-        double dx = snapshot.cameraX() - snapshot.focusX();
-        double dy = snapshot.cameraY() - SEA_LEVEL;
-        double dz = snapshot.cameraZ() - snapshot.focusZ();
-        double distance = Math.sqrt(dx * dx + dy * dy + dz * dz);
-        int lod = (int) Math.floor(Math.log(Math.max(distance, 1f) / (CHUNK_SIZE * SUBDIVIDE_DISTANCE_FACTOR)) / LOG_2);
+        int lod = (int) Math.floor(Math.log(Math.max(snapshot.zoom(), 1f) / (CHUNK_SIZE * SUBDIVIDE_DISTANCE_FACTOR)) / LOG_2);
         return Math.clamp(lod, 0, TOP_LOD);
     }
 
@@ -141,17 +131,9 @@ public class LodChunkVisibilitySelector {
         keys.add(new ChunkLodProcessor.CacheKey(chunkX, chunkZ, dimension, lod));
     }
 
-    public void update(Matrix4f mv, Matrix4f proj, String dimension) {
-        Matrix4f inverseView = new Matrix4f(mv).invert();
-        Vector3f eye = inverseView.transformPosition(new Vector3f());
-        Vector3f forward = inverseView.transformDirection(new Vector3f(0f, 0f, -1f));
-        double distanceToSeaLevel = Math.abs(forward.y) > MIN_FORWARD_Y ? (SEA_LEVEL - eye.y) / forward.y : 0;
-        double focusX = eye.x + forward.x * Math.max(0, distanceToSeaLevel);
-        double focusZ = eye.z + forward.z * Math.max(0, distanceToSeaLevel);
-
+    public void update(Matrix4f mv, Matrix4f proj, String dimension, float focusX, float focusZ, float zoom) {
         Matrix4f viewProjection = new Matrix4f(proj).mul(mv);
-        pendingSnapshot.set(new CameraSnapshot(viewProjection, dimension, focusX, focusZ,
-                eye.x, eye.y, eye.z));
+        pendingSnapshot.set(new CameraSnapshot(viewProjection, dimension, focusX, focusZ, zoom));
     }
 
     public List<LodChunkMesh> visibleChunks() {

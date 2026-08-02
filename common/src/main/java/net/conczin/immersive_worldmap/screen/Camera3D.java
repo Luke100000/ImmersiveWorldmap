@@ -12,11 +12,11 @@ public class Camera3D {
     private static final float PITCH_MAX = -5f;
 
     // desired state
-    private float targetX = 0f, targetZ = 0f;
+    private float targetX, targetY, targetZ;
     private float targetYaw = 0f, targetPitch = -45f, targetZoom = 100f;
 
     // rendered (lerped) state
-    private float smoothX, smoothZ, smoothYaw, smoothPitch, smoothZoom;
+    private float smoothX, smoothY, smoothZ, smoothYaw, smoothPitch, smoothZoom;
 
     // carry-on velocities (target-units per frame, decayed each tick)
     private float velX, velZ, velYaw, velPitch;
@@ -33,6 +33,7 @@ public class Camera3D {
 
     public Camera3D() {
         smoothX = targetX;
+        smoothY = targetY;
         smoothZ = targetZ;
         smoothYaw = targetYaw;
         smoothPitch = targetPitch;
@@ -96,6 +97,7 @@ public class Camera3D {
         if (Math.abs(velPitch) < VELOCITY_EPSILON) velPitch = 0;
 
         smoothX += (targetX - smoothX) * lerp;
+        smoothY += (targetY - smoothY) * lerp;
         smoothZ += (targetZ - smoothZ) * lerp;
         smoothYaw += (targetYaw - smoothYaw) * lerp;
         smoothPitch += (targetPitch - smoothPitch) * lerp;
@@ -203,11 +205,15 @@ public class Camera3D {
         return false;
     }
 
-    public float getSmoothX() {
+    public float getSmoothTargetX() {
         return smoothX;
     }
 
-    public float getSmoothZ() {
+    public float getSmoothTargetY() {
+        return smoothY;
+    }
+
+    public float getSmoothTargetZ() {
         return smoothZ;
     }
 
@@ -223,8 +229,9 @@ public class Camera3D {
         return smoothZoom;
     }
 
-    public void setPan(float x, float z) {
+    public void setTarget(float x, float y, float z) {
         targetX = smoothX = x;
+        targetY = smoothY = y;
         targetZ = smoothZ = z;
     }
 
