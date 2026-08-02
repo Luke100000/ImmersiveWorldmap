@@ -110,6 +110,7 @@ public class LodViewerScreen extends Screen {
     public void render(GuiGraphics graphics, int mouseX, int mouseY, float partialTick) {
         super.render(graphics, mouseX, mouseY, partialTick);
         camera.tick();
+        LodChunkMeshManager.tick();
 
         Matrix4f mv, proj;
         {
@@ -136,10 +137,12 @@ public class LodViewerScreen extends Screen {
         graphics.drawString(this.font, "Tasks: " + ChunkLodProcessor.EXECUTOR.getProcessedTasks()
                 + " / " + ChunkLodProcessor.EXECUTOR.getTotalTasks(), 20, 52, 0xFFFFFF);
         graphics.drawString(this.font, "Visible chunks: " + visible.size(), 20, 64, 0xFFFFFF);
+        graphics.drawString(this.font, "Caches: mesh " + LodChunkMeshManager.INSTANCE.getCacheSize()
+                + "  LOD " + ChunkLodProcessor.getCacheSize(), 20, 76, 0xFFFFFF);
         graphics.drawString(this.font,
                 String.format("Zoom: %.1f  Yaw: %.1f  Pitch: %.1f",
                         camera.getSmoothZoom(), camera.getSmoothYaw(), camera.getSmoothPitch()),
-                20, 76, 0xAAAAAA);
+                20, 88, 0xAAAAAA);
         graphics.drawString(this.font, "LMB: rotate   RMB: pan   Wheel: zoom   WASD: pan", 20, this.height - 20, 0x888888);
 
         if (visible.isEmpty()) {

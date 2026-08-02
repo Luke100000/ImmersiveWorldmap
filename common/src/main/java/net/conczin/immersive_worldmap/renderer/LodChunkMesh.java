@@ -21,6 +21,7 @@ public class LodChunkMesh {
     private volatile boolean pendingMeshReady;
     private volatile boolean dirty = true;
     private volatile boolean requested;
+    private volatile boolean loaded;
     private final AtomicLong revision = new AtomicLong();
     private VertexBuffer vertexBuffer;
 
@@ -32,7 +33,7 @@ public class LodChunkMesh {
     }
 
     public boolean isLoaded() {
-        return mesh != null;
+        return loaded;
     }
 
     public void requestLoad() {
@@ -44,6 +45,7 @@ public class LodChunkMesh {
                 pendingMesh = result;
                 pendingMeshReady = true;
                 dirty = false;
+                loaded = true;
             } else if (error != null && !isCancellation(error)) {
                 ImmersiveWorldmap.LOGGER.error("Failed to load chunk LOD data: {}", error.getMessage());
             }
@@ -104,6 +106,7 @@ public class LodChunkMesh {
         pendingMeshReady = false;
         dirty = true;
         requested = false;
+        loaded = false;
         if (vertexBuffer != null) {
             vertexBuffer.close();
             vertexBuffer = null;
