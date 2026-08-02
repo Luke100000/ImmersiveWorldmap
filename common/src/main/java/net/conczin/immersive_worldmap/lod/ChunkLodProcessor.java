@@ -20,8 +20,7 @@ import java.util.concurrent.ConcurrentHashMap;
 public class ChunkLodProcessor {
     public static PriorityThreadPoolExecutor EXECUTOR;
 
-    private static final int LOD_CACHE_SIZE = 256;
-    private static final TickLruCache<CacheKey, LodChunkData> LOD_CACHE = new TickLruCache<>(LOD_CACHE_SIZE);
+    private static final TickLruCache<CacheKey, LodChunkData> LOD_CACHE = new TickLruCache<>(256);
     private static final Map<CacheKey, CompletableFuture<LodChunkData>> IN_FLIGHT = new ConcurrentHashMap<>();
     private static final Map<CacheKey, CompletableFuture<LodChunkData>> DIRTY_IN_FLIGHT = new ConcurrentHashMap<>();
 
@@ -189,17 +188,23 @@ public class ChunkLodProcessor {
     }
 
     private static void regenerateDirtyLodAsync(CacheKey key) {
-        DIRTY_IN_FLIGHT.computeIfAbsent(key, currentKey -> {
-            CompletableFuture<LodChunkData> future = generateLodAsync(currentKey, currentKey.lod() + 100);
-            future.whenComplete((data, error) -> {
-                if (error == null) {
-                    LOD_CACHE.put(currentKey, data);
-                } else {
-                    markDirty(currentKey);
-                }
-                DIRTY_IN_FLIGHT.remove(currentKey, future);
-            });
-            return future;
+        CompletableFuture<LodChunkData> future = new CompletableFuture<>();
+        if (DIRTY_IN_FLIGHT.putIfAbsent(key, future) != null) return;
+
+        future.whenComplete((data, error) -> {
+            if (error == null) {
+                LOD_CACHE.put(key, data);
+            } else {
+                markDirty(key);
+            }
+            DIRTY_IN_FLIGHT.remove(key, future);
+        });
+        generateLodAsync(key, key.lod() + 100).whenComplete((data, error) -> {
+            if (error == null) {
+                future.complete(data);
+            } else {
+                future.completeExceptionally(error);
+            }
         });
     }
 
@@ -307,16 +312,24 @@ public class ChunkLodProcessor {
         CacheKey key = new CacheKey(chunkX, chunkZ, dimension, lod);
         LodChunkData cached = LOD_CACHE.get(key);
         if (cached != null) return CompletableFuture.completedFuture(cached);
-        return IN_FLIGHT.computeIfAbsent(key, currentKey -> {
-            CompletableFuture<LodChunkData> future = loadLodAsync(currentKey);
-            future.whenComplete((data, error) -> {
-                if (error == null) {
-                    LOD_CACHE.putIfAbsent(currentKey, data);
-                }
-                IN_FLIGHT.remove(currentKey, future);
-            });
-            return future;
+        CompletableFuture<LodChunkData> future = new CompletableFuture<>();
+        CompletableFuture<LodChunkData> existing = IN_FLIGHT.putIfAbsent(key, future);
+        if (existing != null) return existing;
+
+        future.whenComplete((data, error) -> {
+            if (error == null) {
+                LOD_CACHE.putIfAbsent(key, data);
+            }
+            IN_FLIGHT.remove(key, future);
         });
+        loadLodAsync(key).whenComplete((data, error) -> {
+            if (error == null) {
+                future.complete(data);
+            } else {
+                future.completeExceptionally(error);
+            }
+        });
+        return future;
     }
 
     public static void discardQueuedTasksOutside(Set<CacheKey> visibleKeys) {

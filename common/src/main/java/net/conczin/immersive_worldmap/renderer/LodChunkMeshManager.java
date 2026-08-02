@@ -10,8 +10,7 @@ public final class LodChunkMeshManager {
         TickLruCache.tick();
     }
 
-    private static final int MAX_CAPACITY = 4096;
-    private final TickLruCache<ChunkLodProcessor.CacheKey, LodChunkMesh> cache = new TickLruCache<>(MAX_CAPACITY);
+    private final TickLruCache<ChunkLodProcessor.CacheKey, LodChunkMesh> cache = new TickLruCache<>(256);
 
     private LodChunkMeshManager() {
     }

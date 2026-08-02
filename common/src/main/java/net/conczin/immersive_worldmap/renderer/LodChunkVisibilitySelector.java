@@ -1,7 +1,7 @@
 package net.conczin.immersive_worldmap.renderer;
 
 import net.conczin.immersive_worldmap.lod.ChunkLodProcessor;
-import net.conczin.immersive_worldmap.util.FrustumChunkIterator;
+import net.conczin.immersive_worldmap.util.CircularChunkIterator;
 import org.joml.FrustumIntersection;
 import org.joml.Matrix4f;
 import org.joml.Vector3f;
@@ -33,19 +33,19 @@ public class LodChunkVisibilitySelector {
     private static final float CHUNK_HEIGHT = 384f;
     private static final int CHUNK_SIZE = 16;
 
-    private static final float SEA_LEVEL = 0f;
-    private static final float SUBDIVIDE_DISTANCE_FACTOR = 8f;
-    private static final float MIN_FORWARD_Y = 1.0e-4f;
+    private static final double SEA_LEVEL = 0;
+    private static final double SUBDIVIDE_DISTANCE_FACTOR = 16;
+    private static final double MIN_FORWARD_Y = 1.0e-4;
+    private static final double LOG_2 = Math.log(2.0);
 
     private record CameraSnapshot(
             Matrix4f viewProjection,
             String dimension,
-            float focusX,
-            float focusZ,
-            float cameraX,
+            double focusX,
+            double focusZ,
+            double cameraX,
             float cameraY,
-            float cameraZ,
-            int rootSearchRadius
+            float cameraZ
     ) {
     }
 
@@ -93,18 +93,36 @@ public class LodChunkVisibilitySelector {
 
     private List<LodChunkMesh> buildVisibleList(CameraSnapshot snapshot) {
         List<LodChunkMesh> result = new ArrayList<>();
-        float topLevelSize = CHUNK_SIZE * (1 << TOP_LOD);
         FrustumIntersection frustum = new FrustumIntersection(snapshot.viewProjection());
-        FrustumChunkIterator topLevel = new FrustumChunkIterator(
-                snapshot.viewProjection(), topLevelSize, CHUNK_HEIGHT,
-                snapshot.focusX(), snapshot.focusZ(), snapshot.rootSearchRadius()
-        );
-        while (topLevel.hasNext()) {
-            int[] c = topLevel.next();
-            traverse(c[0], c[1], TOP_LOD, snapshot, frustum, result);
+        int lod = selectLod(snapshot);
+        float worldSize = CHUNK_SIZE * (1 << lod);
+        int centerX = (int) Math.floor(snapshot.focusX() / worldSize);
+        int centerZ = (int) Math.floor(snapshot.focusZ() / worldSize);
+
+        CircularChunkIterator chunks = new CircularChunkIterator(centerX, centerZ, 16);
+        while (chunks.hasNext()) {
+            int[] chunk = chunks.next();
+            int chunkX = chunk[0];
+            int chunkZ = chunk[1];
+            if (!frustum.testAab(chunkX * worldSize, 0f, chunkZ * worldSize,
+                    (chunkX + 1) * worldSize, CHUNK_HEIGHT, (chunkZ + 1) * worldSize)) {
+                continue;
+            }
+            LodChunkMesh mesh = LodChunkMeshManager.INSTANCE.get(chunkX, chunkZ, lod, snapshot.dimension());
+            mesh.requestLoad();
+            result.add(mesh);
         }
         updateTaskInterest(result);
         return result;
+    }
+
+    private int selectLod(CameraSnapshot snapshot) {
+        double dx = snapshot.cameraX() - snapshot.focusX();
+        double dy = snapshot.cameraY() - SEA_LEVEL;
+        double dz = snapshot.cameraZ() - snapshot.focusZ();
+        double distance = Math.sqrt(dx * dx + dy * dy + dz * dz);
+        int lod = (int) Math.floor(Math.log(Math.max(distance, 1f) / (CHUNK_SIZE * SUBDIVIDE_DISTANCE_FACTOR)) / LOG_2);
+        return Math.clamp(lod, 0, TOP_LOD);
     }
 
     private void updateTaskInterest(List<LodChunkMesh> visible) {
@@ -123,87 +141,17 @@ public class LodChunkVisibilitySelector {
         keys.add(new ChunkLodProcessor.CacheKey(chunkX, chunkZ, dimension, lod));
     }
 
-    private boolean traverse(
-            int cx,
-            int cz,
-            int lod,
-            CameraSnapshot snapshot,
-            FrustumIntersection frustum,
-            List<LodChunkMesh> result
-    ) {
-        float worldSize = CHUNK_SIZE * (1 << lod);
-        if (!frustum.testAab(cx * worldSize, 0f, cz * worldSize,
-                (cx + 1) * worldSize, CHUNK_HEIGHT, (cz + 1) * worldSize)) {
-            return true;
-        }
-
-        LodChunkMesh self = LodChunkMeshManager.INSTANCE.get(cx, cz, lod, snapshot.dimension());
-        if (lod == 0 || !shouldSubdivide(cx, cz, lod, snapshot)) {
-            addVisible(result, self);
-            return self.isLoaded();
-        }
-
-        int childLod = lod - 1, baseCx = cx * 2, baseCz = cz * 2;
-        List<LodChunkMesh> childResult = new ArrayList<>(4);
-        boolean childrenReady = traverse(baseCx, baseCz, childLod, snapshot, frustum, childResult)
-                                & traverse(baseCx + 1, baseCz, childLod, snapshot, frustum, childResult)
-                                & traverse(baseCx, baseCz + 1, childLod, snapshot, frustum, childResult)
-                                & traverse(baseCx + 1, baseCz + 1, childLod, snapshot, frustum, childResult);
-
-        if (childrenReady || !self.isLoaded()) {
-            result.addAll(childResult);
-            return childrenReady;
-        } else {
-            addVisible(result, self);
-            return self.isLoaded();
-        }
-    }
-
-    private void addVisible(List<LodChunkMesh> result, LodChunkMesh mesh) {
-        mesh.requestLoad();
-        result.add(mesh);
-    }
-
-    private boolean shouldSubdivide(int cx, int cz, int lod, CameraSnapshot snapshot) {
-        float worldSize = CHUNK_SIZE * (1 << lod);
-        float centerX = (cx + 0.5f) * worldSize;
-        float centerY = CHUNK_HEIGHT * 0.5f;
-        float centerZ = (cz + 0.5f) * worldSize;
-        float dx = snapshot.cameraX() - centerX;
-        float dy = snapshot.cameraY() - centerY;
-        float dz = snapshot.cameraZ() - centerZ;
-        return dx * dx + dy * dy + dz * dz < worldSize * worldSize * SUBDIVIDE_DISTANCE_FACTOR * SUBDIVIDE_DISTANCE_FACTOR;
-    }
-
     public void update(Matrix4f mv, Matrix4f proj, String dimension) {
         Matrix4f inverseView = new Matrix4f(mv).invert();
         Vector3f eye = inverseView.transformPosition(new Vector3f());
         Vector3f forward = inverseView.transformDirection(new Vector3f(0f, 0f, -1f));
-        float distanceToSeaLevel = Math.abs(forward.y) > MIN_FORWARD_Y ? (SEA_LEVEL - eye.y) / forward.y : 0f;
-        float focusX = eye.x + forward.x * Math.max(0f, distanceToSeaLevel);
-        float focusZ = eye.z + forward.z * Math.max(0f, distanceToSeaLevel);
+        double distanceToSeaLevel = Math.abs(forward.y) > MIN_FORWARD_Y ? (SEA_LEVEL - eye.y) / forward.y : 0;
+        double focusX = eye.x + forward.x * Math.max(0, distanceToSeaLevel);
+        double focusZ = eye.z + forward.z * Math.max(0, distanceToSeaLevel);
 
         Matrix4f viewProjection = new Matrix4f(proj).mul(mv);
         pendingSnapshot.set(new CameraSnapshot(viewProjection, dimension, focusX, focusZ,
-                eye.x, eye.y, eye.z, rootSearchRadius(viewProjection, focusX, focusZ)));
-    }
-
-    private int rootSearchRadius(Matrix4f viewProjection, float focusX, float focusZ) {
-        Matrix4f inverseViewProjection = new Matrix4f(viewProjection).invert();
-        float maxDistanceSquared = 0f;
-        for (int x = -1; x <= 1; x += 2) {
-            for (int z = -1; z <= 1; z += 2) {
-                Vector4f farCorner = inverseViewProjection.transform(new Vector4f(x, z, 1f, 1f));
-                if (Math.abs(farCorner.w) < 1.0e-6f) continue;
-                float worldX = farCorner.x / farCorner.w;
-                float worldZ = farCorner.z / farCorner.w;
-                float dx = worldX - focusX;
-                float dz = worldZ - focusZ;
-                maxDistanceSquared = Math.max(maxDistanceSquared, dx * dx + dz * dz);
-            }
-        }
-        float topLevelSize = CHUNK_SIZE * (1 << TOP_LOD);
-        return Math.max(1, (int) Math.ceil(Math.sqrt(maxDistanceSquared) / topLevelSize) + 1);
+                eye.x, eye.y, eye.z));
     }
 
     public List<LodChunkMesh> visibleChunks() {
