@@ -37,7 +37,7 @@ public class LodViewerScreen extends Screen {
     @Override
     protected void init() {
         super.init();
-        addRenderableWidget(Button.builder(Component.literal("Clear database"), button -> clearDimension())
+        addRenderableWidget(Button.builder(Component.literal("Clear LODs"), button -> clearGeneratedLods())
                 .bounds(this.width - 250, 20, 110, 20)
                 .build());
         addRenderableWidget(Button.builder(Component.literal("Clear meshes"), button -> clearMeshes())
@@ -45,11 +45,11 @@ public class LodViewerScreen extends Screen {
                 .build());
     }
 
-    private void clearDimension() {
+    private void clearGeneratedLods() {
         if (dimension == null || !DatabaseManager.isInitialized()) {
             return;
         }
-        ChunkLodProcessor.clearDimension(dimension);
+        ChunkLodProcessor.clearGeneratedLods(dimension);
         LodChunkMeshManager.INSTANCE.clear();
         LodChunkVisibilitySelector.reset();
     }

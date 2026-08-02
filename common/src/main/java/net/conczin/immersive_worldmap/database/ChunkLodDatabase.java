@@ -226,6 +226,15 @@ public class ChunkLodDatabase implements AutoCloseable {
         }
     }
 
+    public synchronized void clearGeneratedLods(String dimension) throws SQLException {
+        String sql = "DELETE FROM chunk_lod WHERE dimension = ? AND lod > 0";
+
+        try (PreparedStatement pstmt = connection.prepareStatement(sql)) {
+            pstmt.setString(1, dimension);
+            pstmt.executeUpdate();
+        }
+    }
+
     /**
      * Gets the row count of the chunk_lod table.
      *

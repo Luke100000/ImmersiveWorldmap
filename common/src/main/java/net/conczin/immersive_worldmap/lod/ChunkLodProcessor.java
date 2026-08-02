@@ -35,13 +35,13 @@ public class ChunkLodProcessor {
         EXECUTOR.shutdownNow();
     }
 
-    public static void clearDimension(String dimension) {
+    public static void clearGeneratedLods(String dimension) {
         if (!DatabaseManager.isInitialized()) {
             return;
         }
 
         try {
-            DatabaseManager.getInstance().clearDimension(dimension);
+            DatabaseManager.getInstance().clearGeneratedLods(dimension);
             LOD_CACHE.removeIf(key -> key.dimension().equals(dimension) && key.lod() > 0);
         } catch (SQLException e) {
             ImmersiveWorldmap.LOGGER.warn("Failed to delete generated LOD data: {}", e.getMessage());
@@ -247,7 +247,13 @@ public class ChunkLodProcessor {
 
     private static byte[] generateLod(LodChunkData[][] sources) {
         // Fetch the fixed 2x2 grid of source chunks from the previous LOD level
-        int outHeight = Math.max(1, sources[0][0].getHeight() / 2);
+        int sourceHeight = 0;
+        for (LodChunkData[] sourceColumn : sources) {
+            for (LodChunkData source : sourceColumn) {
+                sourceHeight = Math.max(sourceHeight, source.getHeight());
+            }
+        }
+        int outHeight = Math.max(1, sourceHeight / 2);
         byte[] result = new byte[16 * outHeight * 16];
 
         int[] freq = new int[256];

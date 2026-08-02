@@ -25,17 +25,29 @@ public class LodChunkMeshBuilder {
     @SuppressWarnings("DuplicatedCode")
     public static CompletableFuture<MeshData> buildMeshAsync(int chunkX, int chunkZ, String dimension, int lod) {
         CompletableFuture<LodChunkData> center = ChunkLodProcessor.getLodChunkDataAsync(chunkX, chunkZ, dimension, lod);
-        CompletableFuture<LodChunkData> north = ChunkLodProcessor.getLodChunkDataAsync(chunkX, chunkZ - 1, dimension, lod);
-        CompletableFuture<LodChunkData> south = ChunkLodProcessor.getLodChunkDataAsync(chunkX, chunkZ + 1, dimension, lod);
-        CompletableFuture<LodChunkData> west = ChunkLodProcessor.getLodChunkDataAsync(chunkX - 1, chunkZ, dimension, lod);
-        CompletableFuture<LodChunkData> east = ChunkLodProcessor.getLodChunkDataAsync(chunkX + 1, chunkZ, dimension, lod);
-        return CompletableFuture.allOf(center, north, south, west, east).thenCompose(ignored ->
-                ChunkLodProcessor.EXECUTOR.submit(lod, new ChunkLodProcessor.CacheKey(chunkX, chunkZ, dimension, lod),
-                        () -> buildMesh(center.join(), north.join(), south.join(), west.join(), east.join())));
+        return center.thenCompose(centerData -> {
+            if (centerData.empty()) {
+                return CompletableFuture.completedFuture(null);
+            }
+
+            CompletableFuture<LodChunkData> north = ChunkLodProcessor.getLodChunkDataAsync(chunkX, chunkZ - 1, dimension, lod);
+            CompletableFuture<LodChunkData> south = ChunkLodProcessor.getLodChunkDataAsync(chunkX, chunkZ + 1, dimension, lod);
+            CompletableFuture<LodChunkData> west = ChunkLodProcessor.getLodChunkDataAsync(chunkX - 1, chunkZ, dimension, lod);
+            CompletableFuture<LodChunkData> east = ChunkLodProcessor.getLodChunkDataAsync(chunkX + 1, chunkZ, dimension, lod);
+            CompletableFuture<LodChunkData> northWest = ChunkLodProcessor.getLodChunkDataAsync(chunkX - 1, chunkZ - 1, dimension, lod);
+            CompletableFuture<LodChunkData> northEast = ChunkLodProcessor.getLodChunkDataAsync(chunkX + 1, chunkZ - 1, dimension, lod);
+            CompletableFuture<LodChunkData> southWest = ChunkLodProcessor.getLodChunkDataAsync(chunkX - 1, chunkZ + 1, dimension, lod);
+            CompletableFuture<LodChunkData> southEast = ChunkLodProcessor.getLodChunkDataAsync(chunkX + 1, chunkZ + 1, dimension, lod);
+            return CompletableFuture.allOf(north, south, west, east, northWest, northEast, southWest, southEast).thenCompose(ignored ->
+                    ChunkLodProcessor.EXECUTOR.submit(lod, new ChunkLodProcessor.CacheKey(chunkX, chunkZ, dimension, lod),
+                            () -> buildMesh(new ChunkNeighborhood(centerData, north.join(), south.join(), west.join(), east.join(),
+                                    northWest.join(), northEast.join(), southWest.join(), southEast.join()))));
+        });
     }
 
     @SuppressWarnings("DuplicatedCode")
-    private static MeshData buildMesh(LodChunkData center, LodChunkData north, LodChunkData south, LodChunkData west, LodChunkData east) {
+    private static MeshData buildMesh(ChunkNeighborhood neighbors) {
+        LodChunkData center = neighbors.center();
         if (center.empty()) return null;
 
         Tesselator tesselator = TesselatorPool.acquire();
@@ -93,11 +105,11 @@ public class LodChunkMeshBuilder {
                         int z1 = z + 1;
 
                         // Top face (Y+)
-                        if (isAirWithNeighbors(center, north, south, west, east, x, y + 1, z)) {
-                            float ao00 = vertexAO(center, north, south, west, east, x - 1, y + 1, z, x, y + 1, z - 1, x - 1, y + 1, z - 1);
-                            float ao10 = vertexAO(center, north, south, west, east, x + 1, y + 1, z, x, y + 1, z - 1, x + 1, y + 1, z - 1);
-                            float ao11 = vertexAO(center, north, south, west, east, x + 1, y + 1, z, x, y + 1, z + 1, x + 1, y + 1, z + 1);
-                            float ao01 = vertexAO(center, north, south, west, east, x - 1, y + 1, z, x, y + 1, z + 1, x - 1, y + 1, z + 1);
+                        if (neighbors.isAir(x, y + 1, z)) {
+                            float ao00 = vertexAO(neighbors, x - 1, y + 1, z, x, y + 1, z - 1, x - 1, y + 1, z - 1);
+                            float ao10 = vertexAO(neighbors, x + 1, y + 1, z, x, y + 1, z - 1, x + 1, y + 1, z - 1);
+                            float ao11 = vertexAO(neighbors, x + 1, y + 1, z, x, y + 1, z + 1, x + 1, y + 1, z + 1);
+                            float ao01 = vertexAO(neighbors, x - 1, y + 1, z, x, y + 1, z + 1, x - 1, y + 1, z + 1);
                             if (ao00 + ao11 > ao01 + ao10) {
                                 v(builder, x, y1, z, rTop, gTop, bTop, ao00);
                                 v(builder, x, y1, z1, rTop, gTop, bTop, ao01);
@@ -113,11 +125,11 @@ public class LodChunkMeshBuilder {
 
                         // Bottom face (Y-)
                         //noinspection PointlessBooleanExpression
-                        if (isAirWithNeighbors(center, north, south, west, east, x, y - 1, z) && false) {
-                            float ao00 = vertexAO(center, north, south, west, east, x - 1, y - 1, z, x, y - 1, z - 1, x - 1, y - 1, z - 1);
-                            float ao10 = vertexAO(center, north, south, west, east, x + 1, y - 1, z, x, y - 1, z - 1, x + 1, y - 1, z - 1);
-                            float ao11 = vertexAO(center, north, south, west, east, x + 1, y - 1, z, x, y - 1, z + 1, x + 1, y - 1, z + 1);
-                            float ao01 = vertexAO(center, north, south, west, east, x - 1, y - 1, z, x, y - 1, z + 1, x - 1, y - 1, z + 1);
+                        if (neighbors.isAir(x, y - 1, z) && false) {
+                            float ao00 = vertexAO(neighbors, x - 1, y - 1, z, x, y - 1, z - 1, x - 1, y - 1, z - 1);
+                            float ao10 = vertexAO(neighbors, x + 1, y - 1, z, x, y - 1, z - 1, x + 1, y - 1, z - 1);
+                            float ao11 = vertexAO(neighbors, x + 1, y - 1, z, x, y - 1, z + 1, x + 1, y - 1, z + 1);
+                            float ao01 = vertexAO(neighbors, x - 1, y - 1, z, x, y - 1, z + 1, x - 1, y - 1, z + 1);
                             if (ao00 + ao11 > ao01 + ao10) {
                                 v(builder, x, y, z, rBottom, gBottom, bBottom, ao00);
                                 v(builder, x, y, z1, rBottom, gBottom, bBottom, ao01);
@@ -132,11 +144,11 @@ public class LodChunkMeshBuilder {
                         }
 
                         // North face (Z-)
-                        if (isAirWithNeighbors(center, north, south, west, east, x, y, z - 1)) {
-                            float ao00 = vertexAO(center, north, south, west, east, x - 1, y, z - 1, x, y - 1, z - 1, x - 1, y - 1, z - 1);
-                            float ao10 = vertexAO(center, north, south, west, east, x + 1, y, z - 1, x, y - 1, z - 1, x + 1, y - 1, z - 1);
-                            float ao11 = vertexAO(center, north, south, west, east, x + 1, y, z - 1, x, y + 1, z - 1, x + 1, y + 1, z - 1);
-                            float ao01 = vertexAO(center, north, south, west, east, x - 1, y, z - 1, x, y + 1, z - 1, x - 1, y + 1, z - 1);
+                        if (neighbors.isAir(x, y, z - 1)) {
+                            float ao00 = vertexAO(neighbors, x - 1, y, z - 1, x, y - 1, z - 1, x - 1, y - 1, z - 1);
+                            float ao10 = vertexAO(neighbors, x + 1, y, z - 1, x, y - 1, z - 1, x + 1, y - 1, z - 1);
+                            float ao11 = vertexAO(neighbors, x + 1, y, z - 1, x, y + 1, z - 1, x + 1, y + 1, z - 1);
+                            float ao01 = vertexAO(neighbors, x - 1, y, z - 1, x, y + 1, z - 1, x - 1, y + 1, z - 1);
                             if (ao00 + ao11 > ao01 + ao10) {
                                 v(builder, x, y, z, rSide, gSide, bSide, ao00);
                                 v(builder, x, y1, z, rSide, gSide, bSide, ao01);
@@ -151,11 +163,11 @@ public class LodChunkMeshBuilder {
                         }
 
                         // South face (Z+)
-                        if (isAirWithNeighbors(center, north, south, west, east, x, y, z + 1)) {
-                            float ao00 = vertexAO(center, north, south, west, east, x - 1, y, z + 1, x, y - 1, z + 1, x - 1, y - 1, z + 1);
-                            float ao10 = vertexAO(center, north, south, west, east, x + 1, y, z + 1, x, y - 1, z + 1, x + 1, y - 1, z + 1);
-                            float ao11 = vertexAO(center, north, south, west, east, x + 1, y, z + 1, x, y + 1, z + 1, x + 1, y + 1, z + 1);
-                            float ao01 = vertexAO(center, north, south, west, east, x - 1, y, z + 1, x, y + 1, z + 1, x - 1, y + 1, z + 1);
+                        if (neighbors.isAir(x, y, z + 1)) {
+                            float ao00 = vertexAO(neighbors, x - 1, y, z + 1, x, y - 1, z + 1, x - 1, y - 1, z + 1);
+                            float ao10 = vertexAO(neighbors, x + 1, y, z + 1, x, y - 1, z + 1, x + 1, y - 1, z + 1);
+                            float ao11 = vertexAO(neighbors, x + 1, y, z + 1, x, y + 1, z + 1, x + 1, y + 1, z + 1);
+                            float ao01 = vertexAO(neighbors, x - 1, y, z + 1, x, y + 1, z + 1, x - 1, y + 1, z + 1);
                             if (ao00 + ao11 > ao01 + ao10) {
                                 v(builder, x, y, z1, rSide, gSide, bSide, ao00);
                                 v(builder, x1, y, z1, rSide, gSide, bSide, ao10);
@@ -170,11 +182,11 @@ public class LodChunkMeshBuilder {
                         }
 
                         // West face (X-)
-                        if (isAirWithNeighbors(center, north, south, west, east, x - 1, y, z)) {
-                            float ao00 = vertexAO(center, north, south, west, east, x - 1, y, z - 1, x - 1, y - 1, z, x - 1, y - 1, z - 1);
-                            float ao10 = vertexAO(center, north, south, west, east, x - 1, y, z + 1, x - 1, y - 1, z, x - 1, y - 1, z + 1);
-                            float ao11 = vertexAO(center, north, south, west, east, x - 1, y, z + 1, x - 1, y + 1, z, x - 1, y + 1, z + 1);
-                            float ao01 = vertexAO(center, north, south, west, east, x - 1, y, z - 1, x - 1, y + 1, z, x - 1, y + 1, z - 1);
+                        if (neighbors.isAir(x - 1, y, z)) {
+                            float ao00 = vertexAO(neighbors, x - 1, y, z - 1, x - 1, y - 1, z, x - 1, y - 1, z - 1);
+                            float ao10 = vertexAO(neighbors, x - 1, y, z + 1, x - 1, y - 1, z, x - 1, y - 1, z + 1);
+                            float ao11 = vertexAO(neighbors, x - 1, y, z + 1, x - 1, y + 1, z, x - 1, y + 1, z + 1);
+                            float ao01 = vertexAO(neighbors, x - 1, y, z - 1, x - 1, y + 1, z, x - 1, y + 1, z - 1);
                             if (ao00 + ao11 > ao01 + ao10) {
                                 v(builder, x, y, z, rSideEW, gSideEW, bSideEW, ao00);
                                 v(builder, x, y, z1, rSideEW, gSideEW, bSideEW, ao10);
@@ -189,11 +201,11 @@ public class LodChunkMeshBuilder {
                         }
 
                         // East face (X+)
-                        if (isAirWithNeighbors(center, north, south, west, east, x + 1, y, z)) {
-                            float ao00 = vertexAO(center, north, south, west, east, x + 1, y, z - 1, x + 1, y - 1, z, x + 1, y - 1, z - 1);
-                            float ao10 = vertexAO(center, north, south, west, east, x + 1, y, z + 1, x + 1, y - 1, z, x + 1, y - 1, z + 1);
-                            float ao11 = vertexAO(center, north, south, west, east, x + 1, y, z + 1, x + 1, y + 1, z, x + 1, y + 1, z + 1);
-                            float ao01 = vertexAO(center, north, south, west, east, x + 1, y, z - 1, x + 1, y + 1, z, x + 1, y + 1, z - 1);
+                        if (neighbors.isAir(x + 1, y, z)) {
+                            float ao00 = vertexAO(neighbors, x + 1, y, z - 1, x + 1, y - 1, z, x + 1, y - 1, z - 1);
+                            float ao10 = vertexAO(neighbors, x + 1, y, z + 1, x + 1, y - 1, z, x + 1, y - 1, z + 1);
+                            float ao11 = vertexAO(neighbors, x + 1, y, z + 1, x + 1, y + 1, z, x + 1, y + 1, z + 1);
+                            float ao01 = vertexAO(neighbors, x + 1, y, z - 1, x + 1, y + 1, z, x + 1, y + 1, z - 1);
                             if (ao00 + ao11 > ao01 + ao10) {
                                 v(builder, x1, y, z, rSideEW, gSideEW, bSideEW, ao00);
                                 v(builder, x1, y1, z, rSideEW, gSideEW, bSideEW, ao01);
@@ -223,58 +235,63 @@ public class LodChunkMeshBuilder {
         }
     }
 
-    private static boolean isAirWithNeighbors(
+    private static void v(BufferBuilder b, float x, float y, float z, float r, float g, float col, float ao) {
+        b.addVertex(x, y, z).setColor((int) (r * ao), (int) (g * ao), (int) (col * ao), 255);
+    }
+
+    private static float vertexAO(
+            ChunkNeighborhood neighbors,
+            int sx, int sy, int sz,
+            int cx, int cy, int cz,
+            int ex, int ey, int ez
+    ) {
+        boolean side1 = !neighbors.isAir(sx, sy, sz);
+        boolean side2 = !neighbors.isAir(cx, cy, cz);
+        boolean corner = !neighbors.isAir(ex, ey, ez);
+        if (side1 && side2) return 0.5F;
+        return (3 - ((side1 ? 1 : 0) + (side2 ? 1 : 0) + (corner ? 1 : 0))) / 6.0f + 0.5f;
+    }
+
+    private record ChunkNeighborhood(
             LodChunkData center,
             LodChunkData north,
             LodChunkData south,
             LodChunkData west,
             LodChunkData east,
-            int x,
-            int y,
-            int z
+            LodChunkData northWest,
+            LodChunkData northEast,
+            LodChunkData southWest,
+            LodChunkData southEast
     ) {
-        if (y < 0) {
-            return true;
+        private boolean isAir(int x, int y, int z) {
+            int chunkX = Math.floorDiv(x, 16);
+            int chunkZ = Math.floorDiv(z, 16);
+            LodChunkData chunk = getChunk(chunkX, chunkZ);
+            return chunk == null || chunk.getBlock(Math.floorMod(x, 16), y, Math.floorMod(z, 16)) == 0;
         }
 
-        if (x < 0) {
-            return isAir(west, x + 16, y, z);
+        private LodChunkData getChunk(int chunkX, int chunkZ) {
+            return switch (chunkX) {
+                case -1 -> switch (chunkZ) {
+                    case -1 -> northWest;
+                    case 0 -> west;
+                    case 1 -> southWest;
+                    default -> null;
+                };
+                case 0 -> switch (chunkZ) {
+                    case -1 -> north;
+                    case 0 -> center;
+                    case 1 -> south;
+                    default -> null;
+                };
+                case 1 -> switch (chunkZ) {
+                    case -1 -> northEast;
+                    case 0 -> east;
+                    case 1 -> southEast;
+                    default -> null;
+                };
+                default -> null;
+            };
         }
-        if (x > 15) {
-            return isAir(east, x - 16, y, z);
-        }
-        if (z < 0) {
-            return isAir(north, x, y, z + 16);
-        }
-        if (z > 15) {
-            return isAir(south, x, y, z - 16);
-        }
-
-        if (y >= center.getHeight()) {
-            return true;
-        }
-        return center.getBlock(x, y, z) == 0;
-    }
-
-    private static void v(BufferBuilder b, float x, float y, float z, float r, float g, float col, float ao) {
-        b.addVertex(x, y, z).setColor((int) (r * ao), (int) (g * ao), (int) (col * ao), 255);
-    }
-
-    private static boolean isAir(LodChunkData chunk, int x, int y, int z) {
-        return chunk.getBlock(x, y, z) == 0;
-    }
-
-    private static float vertexAO(
-            LodChunkData center,
-            LodChunkData north, LodChunkData south, LodChunkData west, LodChunkData east,
-            int sx, int sy, int sz,
-            int cx, int cy, int cz,
-            int ex, int ey, int ez
-    ) {
-        boolean side1 = !isAirWithNeighbors(center, north, south, west, east, sx, sy, sz);
-        boolean side2 = !isAirWithNeighbors(center, north, south, west, east, cx, cy, cz);
-        boolean corner = !isAirWithNeighbors(center, north, south, west, east, ex, ey, ez);
-        if (side1 && side2) return 0.5F;
-        return (3 - ((side1 ? 1 : 0) + (side2 ? 1 : 0) + (corner ? 1 : 0))) / 6.0f + 0.5f;
     }
 }

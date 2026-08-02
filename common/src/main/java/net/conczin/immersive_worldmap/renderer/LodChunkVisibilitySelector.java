@@ -92,8 +92,9 @@ public class LodChunkVisibilitySelector {
         float worldSize = CHUNK_SIZE * (1 << lod);
         int centerX = (int) Math.floor(snapshot.focusX() / worldSize);
         int centerZ = (int) Math.floor(snapshot.focusZ() / worldSize);
+        int radius = (int) Math.ceil(snapshot.zoom / 16.0f);
 
-        CircularChunkIterator chunks = new CircularChunkIterator(centerX, centerZ, 4);
+        CircularChunkIterator chunks = new CircularChunkIterator(centerX, centerZ, radius);
         while (chunks.hasNext()) {
             int[] chunk = chunks.next();
             int chunkX = chunk[0];
@@ -123,6 +124,10 @@ public class LodChunkVisibilitySelector {
             addTaskInterest(keys, mesh.chunkX, mesh.chunkZ + 1, mesh.lod, mesh.dimension);
             addTaskInterest(keys, mesh.chunkX - 1, mesh.chunkZ, mesh.lod, mesh.dimension);
             addTaskInterest(keys, mesh.chunkX + 1, mesh.chunkZ, mesh.lod, mesh.dimension);
+            addTaskInterest(keys, mesh.chunkX - 1, mesh.chunkZ - 1, mesh.lod, mesh.dimension);
+            addTaskInterest(keys, mesh.chunkX + 1, mesh.chunkZ - 1, mesh.lod, mesh.dimension);
+            addTaskInterest(keys, mesh.chunkX - 1, mesh.chunkZ + 1, mesh.lod, mesh.dimension);
+            addTaskInterest(keys, mesh.chunkX + 1, mesh.chunkZ + 1, mesh.lod, mesh.dimension);
         }
         ChunkLodProcessor.discardQueuedTasksOutside(keys);
     }

@@ -29,15 +29,14 @@ public record LodChunkData(
             return 0;
         }
         int height = getHeight();
-        int index = (x * height * 16) + (y * 16) + z;
-        if (index >= 0 && index < data.length) {
-            return data[index];
+        if (x < 0 || x >= 16 || y < 0 || y >= height || z < 0 || z >= 16) {
+            return 0;
         }
-        return 0;
+        int index = (x * height * 16) + (y * 16) + z;
+        return data[index];
     }
 
     public boolean empty() {
         return data == null;
     }
 }
-
