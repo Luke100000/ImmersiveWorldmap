@@ -19,3 +19,8 @@
 * Render in map gui
     * Which disables level renderer to fully focus on rendering the map
 * Expose an API (Java and Web)
+
+
+
+Render sky and block light to make it "fair"
+Render uniform lod with max range

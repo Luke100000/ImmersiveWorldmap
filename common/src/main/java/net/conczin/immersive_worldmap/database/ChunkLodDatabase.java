@@ -45,7 +45,9 @@ public class ChunkLodDatabase implements AutoCloseable {
                         z INTEGER NOT NULL,
                         dimension TEXT NOT NULL,
                         lod INTEGER NOT NULL,
-                        colors BLOB NOT NULL,
+                        colors BLOB,
+                        empty INTEGER NOT NULL DEFAULT 0,
+                        dirty INTEGER NOT NULL DEFAULT 0,
                         PRIMARY KEY (x, z, dimension, lod)
                     )
                     """);
@@ -76,19 +78,26 @@ public class ChunkLodDatabase implements AutoCloseable {
      */
     public void upsertChunk(int x, int z, String dimension, int lod, byte[] colors) throws SQLException {
         String sql = """
-                INSERT INTO chunk_lod (x, z, dimension, lod, colors)
-                VALUES (?, ?, ?, ?, ?)
-                ON CONFLICT(x, z, dimension, lod) DO UPDATE SET colors = excluded.colors
+                INSERT INTO chunk_lod (x, z, dimension, lod, colors, empty, dirty)
+                VALUES (?, ?, ?, ?, ?, ?, 0)
+                ON CONFLICT(x, z, dimension, lod) DO UPDATE SET
+                    colors = excluded.colors,
+                    empty = excluded.empty,
+                    dirty = excluded.dirty
                 """;
-
-        byte[] compressed = CompressionUtil.compress(colors);
 
         try (PreparedStatement pstmt = connection.prepareStatement(sql)) {
             pstmt.setInt(1, x);
             pstmt.setInt(2, z);
             pstmt.setString(3, dimension);
             pstmt.setInt(4, lod);
-            pstmt.setBytes(5, compressed);
+            if (colors == null) {
+                pstmt.setNull(5, Types.BLOB);
+                pstmt.setBoolean(6, true);
+            } else {
+                pstmt.setBytes(5, CompressionUtil.compress(colors));
+                pstmt.setBoolean(6, false);
+            }
             pstmt.executeUpdate();
         }
     }
@@ -100,7 +109,7 @@ public class ChunkLodDatabase implements AutoCloseable {
      * @param z         the z coordinate
      * @param dimension the dimension identifier
      * @param lod       the level of detail
-     * @return the color data as a byte array, or null if not found
+     * @return color data, or null when the chunk is empty or not found
      * @throws SQLException if a database access error occurs
      */
     public byte[] getChunkColors(int x, int z, String dimension, int lod) throws SQLException {
@@ -115,7 +124,7 @@ public class ChunkLodDatabase implements AutoCloseable {
             try (ResultSet rs = pstmt.executeQuery()) {
                 if (rs.next()) {
                     byte[] compressed = rs.getBytes("colors");
-                    return CompressionUtil.decompress(compressed);
+                    return compressed == null ? null : CompressionUtil.decompress(compressed);
                 }
             }
         }

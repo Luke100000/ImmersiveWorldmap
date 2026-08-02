@@ -77,12 +77,31 @@ public class ChunkLodProcessor {
         int chunkZ = chunk.getPos().z;
         String dimension = chunk.getLevel().dimension().location().toString();
 
+        // Chunk is empty
+        if (chunk.isEmpty()) {
+            upsertChunkData(chunkX, chunkZ, dimension, 0, null);
+            return;
+        }
+
+        // Check if at least one section is not empty
+        boolean empty = true;
+        LevelChunkSection[] sections = chunk.getSections();
+        for (LevelChunkSection section : sections) {
+            if (!section.hasOnlyAir()) {
+                empty = false;
+                break;
+            }
+        }
+        if (empty) {
+            upsertChunkData(chunkX, chunkZ, dimension, 0, null);
+            return;
+        }
+
         // Full vertical chunk: 16 x height x 16 bytes for LOD 0
         int height = chunk.getHeight();
         byte[] chunkData = new byte[16 * height * 16];
 
         // Process all blocks in the chunk column
-        LevelChunkSection[] sections = chunk.getSections();
         for (int sectionIndex = 0; sectionIndex < sections.length; sectionIndex++) {
             LevelChunkSection section = sections[sectionIndex];
             if (section.hasOnlyAir()) {
@@ -146,12 +165,18 @@ public class ChunkLodProcessor {
                 getLodChunkDataAsync(baseX, baseZ + 1, key.dimension(), key.lod() - 1),
                 getLodChunkDataAsync(baseX + 1, baseZ + 1, key.dimension(), key.lod() - 1)
         );
-        return CompletableFuture.allOf(sources.toArray(CompletableFuture[]::new)).thenCompose(ignored -> EXECUTOR.submit(key.lod(), () -> {
-            LodChunkData[][] data = {{sources.get(0).join(), sources.get(2).join()}, {sources.get(1).join(), sources.get(3).join()}};
-            byte[] result = generateLod(data);
-            upsertChunkData(key.chunkX(), key.chunkZ(), key.dimension(), key.lod(), result);
-            return new LodChunkData(key.chunkX(), key.chunkZ(), key.dimension(), key.lod(), result);
-        }));
+        return CompletableFuture.allOf(sources.toArray(CompletableFuture[]::new)).thenCompose(ignored -> {
+            if (sources.stream().map(CompletableFuture::join).allMatch(LodChunkData::empty)) {
+                upsertChunkData(key.chunkX(), key.chunkZ(), key.dimension(), key.lod(), null);
+                return CompletableFuture.completedFuture(new LodChunkData(key.chunkX(), key.chunkZ(), key.dimension(), key.lod(), null));
+            }
+            return EXECUTOR.submit(key.lod(), () -> {
+                LodChunkData[][] data = {{sources.get(0).join(), sources.get(2).join()}, {sources.get(1).join(), sources.get(3).join()}};
+                byte[] result = generateLod(data);
+                upsertChunkData(key.chunkX(), key.chunkZ(), key.dimension(), key.lod(), result);
+                return new LodChunkData(key.chunkX(), key.chunkZ(), key.dimension(), key.lod(), result);
+            });
+        });
     }
 
     private static byte[] generateLod(LodChunkData[][] sources) {
