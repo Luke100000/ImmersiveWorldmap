@@ -31,7 +31,8 @@ public class LodChunkMeshBuilder {
         CompletableFuture<LodChunkData> west = ChunkLodProcessor.getLodChunkDataAsync(chunkX - 1, chunkZ, dimension, lod);
         CompletableFuture<LodChunkData> east = ChunkLodProcessor.getLodChunkDataAsync(chunkX + 1, chunkZ, dimension, lod);
         return CompletableFuture.allOf(center, north, south, west, east).thenCompose(ignored ->
-                ChunkLodProcessor.EXECUTOR.submit(lod, () -> buildMesh(center.join(), north.join(), south.join(), west.join(), east.join())));
+                ChunkLodProcessor.EXECUTOR.submit(lod, new ChunkLodProcessor.CacheKey(chunkX, chunkZ, dimension, lod),
+                        () -> buildMesh(center.join(), north.join(), south.join(), west.join(), east.join())));
     }
 
     @SuppressWarnings("DuplicatedCode")

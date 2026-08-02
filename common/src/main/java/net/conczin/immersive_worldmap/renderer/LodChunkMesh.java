@@ -7,6 +7,8 @@ import net.conczin.immersive_worldmap.ImmersiveWorldmap;
 import net.minecraft.client.renderer.GameRenderer;
 import org.joml.Matrix4f;
 
+import java.util.concurrent.CancellationException;
+
 public class LodChunkMesh {
     public final int chunkX;
     public final int chunkZ;
@@ -14,6 +16,7 @@ public class LodChunkMesh {
     public final String dimension;
 
     private volatile MeshData mesh;
+    private volatile boolean requested;
     private VertexBuffer vertexBuffer;
 
     public LodChunkMesh(int chunkX, int chunkZ, int lod, String dimension) {
@@ -28,10 +31,24 @@ public class LodChunkMesh {
     }
 
     public void requestLoad() {
-        LodChunkMeshBuilder.buildMeshAsync(chunkX, chunkZ, dimension, lod).thenAccept(result -> mesh = result).exceptionally(ex -> {
-            ImmersiveWorldmap.LOGGER.error("Failed to load chunk LOD data: {}", ex.getMessage());
-            return null;
+        if (requested) return;
+        requested = true;
+        LodChunkMeshBuilder.buildMeshAsync(chunkX, chunkZ, dimension, lod).whenComplete((result, error) -> {
+            if (error == null) {
+                mesh = result;
+            } else if (!isCancellation(error)) {
+                ImmersiveWorldmap.LOGGER.error("Failed to load chunk LOD data: {}", error.getMessage());
+            }
+            if (error != null) requested = false;
         });
+    }
+
+    private static boolean isCancellation(Throwable error) {
+        while (error != null) {
+            if (error instanceof CancellationException) return true;
+            error = error.getCause();
+        }
+        return false;
     }
 
     // Must be called from the render thread.

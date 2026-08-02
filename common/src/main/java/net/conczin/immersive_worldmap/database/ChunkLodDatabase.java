@@ -76,14 +76,13 @@ public class ChunkLodDatabase implements AutoCloseable {
      * @param colors    the binary color data
      * @throws SQLException if a database access error occurs
      */
-    public void upsertChunk(int x, int z, String dimension, int lod, byte[] colors) throws SQLException {
+    public synchronized void upsertChunk(int x, int z, String dimension, int lod, byte[] colors) throws SQLException {
         String sql = """
                 INSERT INTO chunk_lod (x, z, dimension, lod, colors, empty, dirty)
                 VALUES (?, ?, ?, ?, ?, ?, 0)
                 ON CONFLICT(x, z, dimension, lod) DO UPDATE SET
                     colors = excluded.colors,
-                    empty = excluded.empty,
-                    dirty = excluded.dirty
+                    empty = excluded.empty
                 """;
 
         try (PreparedStatement pstmt = connection.prepareStatement(sql)) {
@@ -100,6 +99,31 @@ public class ChunkLodDatabase implements AutoCloseable {
             }
             pstmt.executeUpdate();
         }
+
+        markParentsDirty(x, z, dimension, lod);
+    }
+
+    private void markParentsDirty(int x, int z, String dimension, int lod) throws SQLException {
+        int maxLod;
+        try (PreparedStatement statement = connection.prepareStatement("SELECT MAX(lod) FROM chunk_lod WHERE dimension = ?")) {
+            statement.setString(1, dimension);
+            try (ResultSet result = statement.executeQuery()) {
+                maxLod = result.next() ? result.getInt(1) : lod;
+            }
+        }
+
+        String sql = "UPDATE chunk_lod SET dirty = 1 WHERE x = ? AND z = ? AND dimension = ? AND lod = ?";
+        try (PreparedStatement statement = connection.prepareStatement(sql)) {
+            for (int parentLod = lod + 1; parentLod <= maxLod; parentLod++) {
+                x = Math.floorDiv(x, 2);
+                z = Math.floorDiv(z, 2);
+                statement.setInt(1, x);
+                statement.setInt(2, z);
+                statement.setString(3, dimension);
+                statement.setInt(4, parentLod);
+                statement.executeUpdate();
+            }
+        }
     }
 
     /**
@@ -112,7 +136,7 @@ public class ChunkLodDatabase implements AutoCloseable {
      * @return color data, or null when the chunk is empty or not found
      * @throws SQLException if a database access error occurs
      */
-    public byte[] getChunkColors(int x, int z, String dimension, int lod) throws SQLException {
+    public synchronized byte[] getChunkColors(int x, int z, String dimension, int lod) throws SQLException {
         String sql = "SELECT colors FROM chunk_lod WHERE x = ? AND z = ? AND dimension = ? AND lod = ?";
 
         try (PreparedStatement pstmt = connection.prepareStatement(sql)) {
@@ -129,6 +153,41 @@ public class ChunkLodDatabase implements AutoCloseable {
             }
         }
         return null;
+    }
+
+    public synchronized boolean hasChunk(int x, int z, String dimension, int lod) throws SQLException {
+        String sql = "SELECT 1 FROM chunk_lod WHERE x = ? AND z = ? AND dimension = ? AND lod = ?";
+        try (PreparedStatement pstmt = connection.prepareStatement(sql)) {
+            pstmt.setInt(1, x);
+            pstmt.setInt(2, z);
+            pstmt.setString(3, dimension);
+            pstmt.setInt(4, lod);
+            try (ResultSet rs = pstmt.executeQuery()) {
+                return rs.next();
+            }
+        }
+    }
+
+    public synchronized boolean takeDirty(int x, int z, String dimension, int lod) throws SQLException {
+        String sql = "UPDATE chunk_lod SET dirty = 0 WHERE x = ? AND z = ? AND dimension = ? AND lod = ? AND dirty = 1";
+        try (PreparedStatement pstmt = connection.prepareStatement(sql)) {
+            pstmt.setInt(1, x);
+            pstmt.setInt(2, z);
+            pstmt.setString(3, dimension);
+            pstmt.setInt(4, lod);
+            return pstmt.executeUpdate() == 1;
+        }
+    }
+
+    public synchronized void markDirty(int x, int z, String dimension, int lod) throws SQLException {
+        String sql = "UPDATE chunk_lod SET dirty = 1 WHERE x = ? AND z = ? AND dimension = ? AND lod = ?";
+        try (PreparedStatement pstmt = connection.prepareStatement(sql)) {
+            pstmt.setInt(1, x);
+            pstmt.setInt(2, z);
+            pstmt.setString(3, dimension);
+            pstmt.setInt(4, lod);
+            pstmt.executeUpdate();
+        }
     }
 
     /**

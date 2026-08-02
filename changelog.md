@@ -8,6 +8,9 @@
 * Caches are all a bit funky and too small
 * Threading seems IO locked af
 * Upsert doesnt clear parents
+* Render sky and block light to make it "fair"
+* Render uniform lod with max range
+* Clear mesh cache
 
 ## Plan
 
@@ -19,8 +22,3 @@
 * Render in map gui
     * Which disables level renderer to fully focus on rendering the map
 * Expose an API (Java and Web)
-
-
-
-Render sky and block light to make it "fair"
-Render uniform lod with max range

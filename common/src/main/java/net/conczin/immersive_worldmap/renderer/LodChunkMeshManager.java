@@ -48,7 +48,6 @@ public final class LodChunkMeshManager {
             return entry.state;
         }
         LodChunkMesh mesh = new LodChunkMesh(cx, cz, lod, dimension);
-        mesh.requestLoad();
         cache.put(key, new Entry(mesh, tick));
         return mesh;
     }

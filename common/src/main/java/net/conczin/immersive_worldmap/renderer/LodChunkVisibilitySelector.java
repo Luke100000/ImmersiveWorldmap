@@ -1,5 +1,6 @@
 package net.conczin.immersive_worldmap.renderer;
 
+import net.conczin.immersive_worldmap.lod.ChunkLodProcessor;
 import net.conczin.immersive_worldmap.util.FrustumChunkIterator;
 import org.joml.FrustumIntersection;
 import org.joml.Matrix4f;
@@ -7,7 +8,9 @@ import org.joml.Vector3f;
 import org.joml.Vector4f;
 
 import java.util.ArrayList;
+import java.util.HashSet;
 import java.util.List;
+import java.util.Set;
 import java.util.concurrent.atomic.AtomicReference;
 import java.util.concurrent.locks.LockSupport;
 
@@ -100,7 +103,24 @@ public class LodChunkVisibilitySelector {
             int[] c = topLevel.next();
             traverse(c[0], c[1], TOP_LOD, snapshot, frustum, result);
         }
+        updateTaskInterest(result);
         return result;
+    }
+
+    private void updateTaskInterest(List<LodChunkMesh> visible) {
+        Set<ChunkLodProcessor.CacheKey> keys = new HashSet<>();
+        for (LodChunkMesh mesh : visible) {
+            addTaskInterest(keys, mesh.chunkX, mesh.chunkZ, mesh.lod, mesh.dimension);
+            addTaskInterest(keys, mesh.chunkX, mesh.chunkZ - 1, mesh.lod, mesh.dimension);
+            addTaskInterest(keys, mesh.chunkX, mesh.chunkZ + 1, mesh.lod, mesh.dimension);
+            addTaskInterest(keys, mesh.chunkX - 1, mesh.chunkZ, mesh.lod, mesh.dimension);
+            addTaskInterest(keys, mesh.chunkX + 1, mesh.chunkZ, mesh.lod, mesh.dimension);
+        }
+        ChunkLodProcessor.discardQueuedTasksOutside(keys);
+    }
+
+    private void addTaskInterest(Set<ChunkLodProcessor.CacheKey> keys, int chunkX, int chunkZ, int lod, String dimension) {
+        keys.add(new ChunkLodProcessor.CacheKey(chunkX, chunkZ, dimension, lod));
     }
 
     private boolean traverse(
@@ -119,7 +139,7 @@ public class LodChunkVisibilitySelector {
 
         LodChunkMesh self = LodChunkMeshManager.INSTANCE.get(cx, cz, lod, snapshot.dimension());
         if (lod == 0 || !shouldSubdivide(cx, cz, lod, snapshot)) {
-            result.add(self);
+            addVisible(result, self);
             return self.isLoaded();
         }
 
@@ -134,9 +154,14 @@ public class LodChunkVisibilitySelector {
             result.addAll(childResult);
             return childrenReady;
         } else {
-            result.add(self);
+            addVisible(result, self);
             return self.isLoaded();
         }
+    }
+
+    private void addVisible(List<LodChunkMesh> result, LodChunkMesh mesh) {
+        mesh.requestLoad();
+        result.add(mesh);
     }
 
     private boolean shouldSubdivide(int cx, int cz, int lod, CameraSnapshot snapshot) {
