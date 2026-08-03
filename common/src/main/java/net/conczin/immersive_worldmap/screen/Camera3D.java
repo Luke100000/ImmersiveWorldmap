@@ -2,14 +2,14 @@ package net.conczin.immersive_worldmap.screen;
 
 
 public class Camera3D {
-    private static final float SMOOTH_HALF_LIFE = 0.07f;
-    private static final float DECAY_HALF_LIFE = 0.12f;
+    private static final float SMOOTH_HALF_LIFE = 0.025f;
+    private static final float DECAY_HALF_LIFE = 0.05f;
     private static final float VELOCITY_EPSILON = 0.001f;
 
     private static final float ZOOM_MIN = 1f;
-    private static final float ZOOM_MAX = 4000f;
-    private static final float PITCH_MIN = -89f;
-    private static final float PITCH_MAX = -5f;
+    private static final float ZOOM_MAX = 10000f;
+    private static final float PITCH_MIN = -89.9f;
+    private static final float PITCH_MAX = -25f;
 
     // desired state
     private float targetX, targetY, targetZ;

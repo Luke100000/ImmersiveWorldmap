@@ -5,10 +5,7 @@ import net.conczin.immersive_worldmap.util.CircularChunkIterator;
 import org.joml.FrustumIntersection;
 import org.joml.Matrix4f;
 
-import java.util.ArrayList;
-import java.util.HashSet;
-import java.util.List;
-import java.util.Set;
+import java.util.*;
 import java.util.concurrent.atomic.AtomicReference;
 import java.util.concurrent.locks.LockSupport;
 
@@ -31,7 +28,8 @@ public class LodChunkVisibilitySelector {
     private static final float CHUNK_HEIGHT = 384f;
     private static final int CHUNK_SIZE = 16;
 
-    private static final double SUBDIVIDE_DISTANCE_FACTOR = 16;
+    private static final double SUBDIVIDE_DISTANCE_FACTOR = 10;
+    private static final double RENDER_DISTANCE = 24;
     private static final double LOG_2 = Math.log(2.0);
 
     private record CameraSnapshot(
@@ -86,34 +84,117 @@ public class LodChunkVisibilitySelector {
     }
 
     private List<LodChunkMesh> buildVisibleList(CameraSnapshot snapshot) {
-        List<LodChunkMesh> result = new ArrayList<>();
-        FrustumIntersection frustum = new FrustumIntersection(snapshot.viewProjection());
-        int lod = selectLod(snapshot);
-        float worldSize = CHUNK_SIZE * (1 << lod);
-        int centerX = (int) Math.floor(snapshot.focusX() / worldSize);
-        int centerZ = (int) Math.floor(snapshot.focusZ() / worldSize);
-        int radius = (int) Math.ceil(snapshot.zoom / 16.0f);
-
-        CircularChunkIterator chunks = new CircularChunkIterator(centerX, centerZ, radius);
-        while (chunks.hasNext()) {
-            int[] chunk = chunks.next();
-            int chunkX = chunk[0];
-            int chunkZ = chunk[1];
-            if (!frustum.testAab(chunkX * worldSize, 0f, chunkZ * worldSize,
-                    (chunkX + 1) * worldSize, CHUNK_HEIGHT, (chunkZ + 1) * worldSize)) {
-                continue;
+        List<LodChunkMesh> selected = new ArrayList<>();
+        List<LodChunkMesh> targetMeshes = new ArrayList<>();
+        Map<ChunkLodProcessor.CacheKey, LodChunkMesh> loadedMeshes = new HashMap<>();
+        for (LodChunkMesh mesh : buffers[readIndex]) {
+            if (mesh.isLoaded()) {
+                loadedMeshes.put(new ChunkLodProcessor.CacheKey(mesh.chunkX, mesh.chunkZ, mesh.dimension, mesh.lod), mesh);
             }
-            LodChunkMesh mesh = LodChunkMeshManager.INSTANCE.get(chunkX, chunkZ, lod, snapshot.dimension());
-            mesh.requestLoad();
-            result.add(mesh);
         }
-        updateTaskInterest(result);
-        return result;
+
+        FrustumIntersection frustum = new FrustumIntersection(snapshot.viewProjection());
+        int targetLod = selectLod(snapshot);
+        double radius = Math.ceil(snapshot.zoom() / CHUNK_SIZE * RENDER_DISTANCE);
+        float rootWorldSize = worldSize(TOP_LOD);
+        int centerX = (int) Math.floor(snapshot.focusX() / rootWorldSize);
+        int centerZ = (int) Math.floor(snapshot.focusZ() / rootWorldSize);
+        int rootRadius = (int) Math.ceil(radius / rootWorldSize) + 1;
+
+        CircularChunkIterator roots = new CircularChunkIterator(centerX, centerZ, rootRadius);
+        while (roots.hasNext()) {
+            int[] root = roots.next();
+            visit(root[0], root[1], TOP_LOD, targetLod, radius, snapshot, frustum,
+                    loadedMeshes, targetMeshes, selected);
+        }
+
+        Comparator<LodChunkMesh> byDistance = Comparator.comparingDouble(mesh -> distanceSquared(mesh, snapshot));
+        targetMeshes.sort(byDistance);
+        selected.sort(byDistance);
+        for (LodChunkMesh mesh : targetMeshes) {
+            mesh.requestLoad();
+        }
+        updateTaskInterest(targetMeshes);
+        return selected;
     }
 
     private int selectLod(CameraSnapshot snapshot) {
         int lod = (int) Math.floor(Math.log(Math.max(snapshot.zoom(), 1f) / (CHUNK_SIZE * SUBDIVIDE_DISTANCE_FACTOR)) / LOG_2);
         return Math.clamp(lod, 0, TOP_LOD);
+    }
+
+    private boolean visit(
+            int chunkX,
+            int chunkZ,
+            int lod,
+            int targetLod,
+            double radius,
+            CameraSnapshot snapshot,
+            FrustumIntersection frustum,
+            Map<ChunkLodProcessor.CacheKey, LodChunkMesh> loadedMeshes,
+            List<LodChunkMesh> targetMeshes,
+            List<LodChunkMesh> selected
+    ) {
+        float size = worldSize(lod);
+        if (!isVisible(chunkX, chunkZ, size, radius, snapshot, frustum)) {
+            return true;
+        }
+
+        ChunkLodProcessor.CacheKey key = new ChunkLodProcessor.CacheKey(chunkX, chunkZ, snapshot.dimension(), lod);
+        LodChunkMesh mesh = loadedMeshes.get(key);
+        if (lod == targetLod) {
+            mesh = LodChunkMeshManager.INSTANCE.get(chunkX, chunkZ, lod, snapshot.dimension());
+            targetMeshes.add(mesh);
+        }
+        if (lod <= targetLod && mesh != null && mesh.isLoaded()) {
+            selected.add(mesh);
+            return true;
+        }
+        if (lod == 0) {
+            return false;
+        }
+
+        int selectedStart = selected.size();
+        boolean covered = true;
+        int childX = chunkX * 2;
+        int childZ = chunkZ * 2;
+        for (int x = 0; x < 2; x++) {
+            for (int z = 0; z < 2; z++) {
+                covered &= visit(childX + x, childZ + z, lod - 1, targetLod, radius,
+                        snapshot, frustum, loadedMeshes, targetMeshes, selected);
+            }
+        }
+        if (covered) {
+            return true;
+        }
+        if (mesh != null && mesh.isLoaded()) {
+            selected.subList(selectedStart, selected.size()).clear();
+            selected.add(mesh);
+            return true;
+        }
+        return false;
+    }
+
+    private boolean isVisible(int chunkX, int chunkZ, float size, double radius, CameraSnapshot snapshot, FrustumIntersection frustum) {
+        float minX = chunkX * size;
+        float minZ = chunkZ * size;
+        double nearestX = Math.clamp(snapshot.focusX(), minX, minX + size);
+        double nearestZ = Math.clamp(snapshot.focusZ(), minZ, minZ + size);
+        double dx = nearestX - snapshot.focusX();
+        double dz = nearestZ - snapshot.focusZ();
+        return dx * dx + dz * dz <= radius * radius
+                && frustum.testAab(minX, 0f, minZ, minX + size, CHUNK_HEIGHT, minZ + size);
+    }
+
+    private float worldSize(int lod) {
+        return CHUNK_SIZE * (1 << lod);
+    }
+
+    private double distanceSquared(LodChunkMesh mesh, CameraSnapshot snapshot) {
+        float size = worldSize(mesh.lod);
+        double dx = (mesh.chunkX + 0.5) * size - snapshot.focusX();
+        double dz = (mesh.chunkZ + 0.5) * size - snapshot.focusZ();
+        return dx * dx + dz * dz;
     }
 
     private void updateTaskInterest(List<LodChunkMesh> visible) {

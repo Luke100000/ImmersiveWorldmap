@@ -30,7 +30,9 @@ public class LodViewerScreen extends Screen {
         if (minecraft.player == null || minecraft.level == null) return;
 
         dimension = minecraft.level.dimension().location().toString();
-        camera.setTarget((float) minecraft.player.getX(), (float) minecraft.player.getY(), (float) minecraft.player.getZ());
+        camera.setTarget((float) minecraft.player.getX(),
+                (float) (minecraft.player.getY() - minecraft.level.getMinBuildHeight()),
+                (float) minecraft.player.getZ());
         camera.setZoom(500f);
     }
 

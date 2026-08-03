@@ -10,7 +10,7 @@ public final class LodChunkMeshManager {
         TickLruCache.tick();
     }
 
-    private final TickLruCache<ChunkLodProcessor.CacheKey, LodChunkMesh> cache = new TickLruCache<>(256);
+    private final TickLruCache<ChunkLodProcessor.CacheKey, LodChunkMesh> cache = new TickLruCache<>(4096);
 
     private LodChunkMeshManager() {
     }
