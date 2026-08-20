@@ -2,14 +2,12 @@ package net.conczin.immersive_worldmap;
 
 import net.conczin.immersive_worldmap.screen.LodViewerScreen;
 import net.minecraft.client.Minecraft;
-import net.minecraft.client.multiplayer.ClientLevel;
 import net.neoforged.api.distmarker.Dist;
 import net.neoforged.bus.api.SubscribeEvent;
 import net.neoforged.fml.common.EventBusSubscriber;
 import net.neoforged.fml.common.Mod;
+import net.neoforged.neoforge.client.event.ClientPlayerNetworkEvent;
 import net.neoforged.neoforge.client.event.ClientTickEvent;
-import net.neoforged.neoforge.event.level.LevelEvent;
-import net.neoforged.neoforge.event.tick.LevelTickEvent;
 
 @Mod(value = ImmersiveWorldmap.MOD_ID, dist = Dist.CLIENT)
 @EventBusSubscriber(modid = ImmersiveWorldmap.MOD_ID, value = Dist.CLIENT)
@@ -31,16 +29,12 @@ public class ImmersiveWorldmapNeoForge {
     }
 
     @SubscribeEvent
-    public static void onWorldLoad(LevelTickEvent.Pre event) {
-        if (event.getLevel() instanceof ClientLevel) {
-            ImmersiveWorldmap.start();
-        }
+    public static void onWorldLoad(ClientPlayerNetworkEvent.LoggingIn event) {
+        ImmersiveWorldmap.start();
     }
 
     @SubscribeEvent
-    public static void onWorldUnload(LevelEvent.Unload event) {
-        if (event.getLevel() instanceof ClientLevel) {
-            ImmersiveWorldmap.shutdown();
-        }
+    public static void onWorldUnload(ClientPlayerNetworkEvent.LoggingOut event) {
+        ImmersiveWorldmap.shutdown();
     }
 }

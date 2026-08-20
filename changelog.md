@@ -1,24 +1,17 @@
 # TODO
 
-* Distance metric and camera position are fucked
-* No spam (if the main iterator slips, it will load the entire world)
-* Chunk culling not on sub chunks yet
-* No batching at all
-* No layering (Flood fill from current layer)
-* Caches are all a bit funky and too small
-* Threading seems IO locked af
-* Upsert doesnt clear parents
-* Render sky and block light to make it "fair"
-* Render uniform lod with max range
-* Clear mesh cache
+* Port to 1.21.1 and sync multiloader
+* Deduplicate incoming chunks (hash? Time?)
+* Screen transition
+* Make sure screen does not render background
+* Finalize screen
+* Markers
+* Cave viewer
+* Make sure v1 is not blocked (database can be moved safely)
+* Debug view
+* Profiling and maybe batching, especially the air-chunks
+* Install chunky in dev
 
-## Plan
+# V1
 
-* Maintains an SQLite database of (x, y, z, dimension, lod, colors) for each chunk.
-* Convert chunks into colors (bytes)
-* Intercept client sided chunks
-* Generate LODs on demand
-* Generate efficient meshes on demand
-* Render in map gui
-    * Which disables level renderer to fully focus on rendering the map
-* Expose an API (Java and Web)
+* Optional server support (Fetch chunks from server directly? Make the database common sided?)

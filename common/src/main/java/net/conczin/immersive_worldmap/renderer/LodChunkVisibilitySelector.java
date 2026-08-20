@@ -24,7 +24,8 @@ public class LodChunkVisibilitySelector {
         }
     }
 
-    private static final int TOP_LOD = 5;
+    public static final int TOP_LOD = 5;
+
     private static final float CHUNK_HEIGHT = 384f;
     private static final int CHUNK_SIZE = 16;
 
@@ -183,7 +184,7 @@ public class LodChunkVisibilitySelector {
         double dx = nearestX - snapshot.focusX();
         double dz = nearestZ - snapshot.focusZ();
         return dx * dx + dz * dz <= radius * radius
-                && frustum.testAab(minX, 0f, minZ, minX + size, CHUNK_HEIGHT, minZ + size);
+               && frustum.testAab(minX, 0f, minZ, minX + size, CHUNK_HEIGHT, minZ + size);
     }
 
     private float worldSize(int lod) {

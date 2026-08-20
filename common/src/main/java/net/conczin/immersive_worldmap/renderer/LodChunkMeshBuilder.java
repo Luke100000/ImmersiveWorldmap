@@ -61,6 +61,7 @@ public class LodChunkMeshBuilder {
             float bottomBrightness = 0.5F;
             float sideBrightness = 0.8F;
             float sideEWBrightness = 0.72F; // 0.8 * 0.9
+            boolean hasFaces = false;
 
             // Iterate through all blocks and render visible faces
             for (int x = 0; x < 16; x++) {
@@ -106,6 +107,7 @@ public class LodChunkMeshBuilder {
 
                         // Top face (Y+)
                         if (neighbors.isAir(x, y + 1, z)) {
+                            hasFaces = true;
                             float ao00 = vertexAO(neighbors, x - 1, y + 1, z, x, y + 1, z - 1, x - 1, y + 1, z - 1);
                             float ao10 = vertexAO(neighbors, x + 1, y + 1, z, x, y + 1, z - 1, x + 1, y + 1, z - 1);
                             float ao11 = vertexAO(neighbors, x + 1, y + 1, z, x, y + 1, z + 1, x + 1, y + 1, z + 1);
@@ -145,6 +147,7 @@ public class LodChunkMeshBuilder {
 
                         // North face (Z-)
                         if (neighbors.isAir(x, y, z - 1)) {
+                            hasFaces = true;
                             float ao00 = vertexAO(neighbors, x - 1, y, z - 1, x, y - 1, z - 1, x - 1, y - 1, z - 1);
                             float ao10 = vertexAO(neighbors, x + 1, y, z - 1, x, y - 1, z - 1, x + 1, y - 1, z - 1);
                             float ao11 = vertexAO(neighbors, x + 1, y, z - 1, x, y + 1, z - 1, x + 1, y + 1, z - 1);
@@ -164,6 +167,7 @@ public class LodChunkMeshBuilder {
 
                         // South face (Z+)
                         if (neighbors.isAir(x, y, z + 1)) {
+                            hasFaces = true;
                             float ao00 = vertexAO(neighbors, x - 1, y, z + 1, x, y - 1, z + 1, x - 1, y - 1, z + 1);
                             float ao10 = vertexAO(neighbors, x + 1, y, z + 1, x, y - 1, z + 1, x + 1, y - 1, z + 1);
                             float ao11 = vertexAO(neighbors, x + 1, y, z + 1, x, y + 1, z + 1, x + 1, y + 1, z + 1);
@@ -183,6 +187,7 @@ public class LodChunkMeshBuilder {
 
                         // West face (X-)
                         if (neighbors.isAir(x - 1, y, z)) {
+                            hasFaces = true;
                             float ao00 = vertexAO(neighbors, x - 1, y, z - 1, x - 1, y - 1, z, x - 1, y - 1, z - 1);
                             float ao10 = vertexAO(neighbors, x - 1, y, z + 1, x - 1, y - 1, z, x - 1, y - 1, z + 1);
                             float ao11 = vertexAO(neighbors, x - 1, y, z + 1, x - 1, y + 1, z, x - 1, y + 1, z + 1);
@@ -202,6 +207,7 @@ public class LodChunkMeshBuilder {
 
                         // East face (X+)
                         if (neighbors.isAir(x + 1, y, z)) {
+                            hasFaces = true;
                             float ao00 = vertexAO(neighbors, x + 1, y, z - 1, x + 1, y - 1, z, x + 1, y - 1, z - 1);
                             float ao10 = vertexAO(neighbors, x + 1, y, z + 1, x + 1, y - 1, z, x + 1, y - 1, z + 1);
                             float ao11 = vertexAO(neighbors, x + 1, y, z + 1, x + 1, y + 1, z, x + 1, y + 1, z + 1);
@@ -222,14 +228,7 @@ public class LodChunkMeshBuilder {
                 }
             }
 
-            // Anti-empty-mesh
-            // TODO
-            v(builder, 0, 0, 0, 1, 1, 1, 1);
-            v(builder, 0, 0, 0, 1, 1, 1, 1);
-            v(builder, 0, 0, 0, 1, 1, 1, 1);
-            v(builder, 0, 0, 0, 1, 1, 1, 1);
-
-            return builder.buildOrThrow();
+            return hasFaces ? builder.buildOrThrow() : null;
         } finally {
             TesselatorPool.release(tesselator);
         }

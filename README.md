@@ -1,3 +1,3 @@
 # Immersive Worldmap
 
-Fast client sided 3D ingame worldmap.
+A fast, client-side 3D world map of the chunks you explore.

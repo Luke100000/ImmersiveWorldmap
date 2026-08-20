@@ -7,9 +7,6 @@ import java.util.concurrent.ConcurrentLinkedQueue;
 public final class TesselatorPool {
     private static final ConcurrentLinkedQueue<Tesselator> POOL = new ConcurrentLinkedQueue<>();
 
-    private TesselatorPool() {
-    }
-
     public static Tesselator acquire() {
         Tesselator tesselator = POOL.poll();
         return tesselator != null ? tesselator : new Tesselator(65536);

@@ -12,9 +12,6 @@ public final class LodChunkMeshManager {
 
     private final TickLruCache<ChunkLodProcessor.CacheKey, LodChunkMesh> cache = new TickLruCache<>(4096);
 
-    private LodChunkMeshManager() {
-    }
-
     public LodChunkMesh get(int cx, int cz, int lod, String dimension) {
         ChunkLodProcessor.CacheKey key = new ChunkLodProcessor.CacheKey(cx, cz, dimension, lod);
         LodChunkMesh existing = cache.get(key);
@@ -31,8 +28,12 @@ public final class LodChunkMeshManager {
     }
 
     public void invalidate(int cx, int cz, int lod, String dimension) {
-        LodChunkMesh mesh = cache.get(new ChunkLodProcessor.CacheKey(cx, cz, dimension, lod));
-        if (mesh != null) mesh.markDirty();
+        for (int parentLod = lod; parentLod <= LodChunkVisibilitySelector.TOP_LOD; parentLod++) {
+            LodChunkMesh mesh = cache.get(new ChunkLodProcessor.CacheKey(cx, cz, dimension, parentLod));
+            if (mesh != null) mesh.markDirty();
+            cx = Math.floorDiv(cx, 2);
+            cz = Math.floorDiv(cz, 2);
+        }
     }
 
     public int getCacheSize() {
