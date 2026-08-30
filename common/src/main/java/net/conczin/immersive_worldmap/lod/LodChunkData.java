@@ -17,6 +17,8 @@ public record LodChunkData(
         int lodLevel,
         byte[] data
 ) {
+    public static final int MAX_LOD = 5;
+
     public int getHeight() {
         if (data == null) {
             return 0;

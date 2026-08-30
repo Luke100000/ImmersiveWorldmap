@@ -1,6 +1,7 @@
 package net.conczin.immersive_worldmap.renderer;
 
 import net.conczin.immersive_worldmap.lod.ChunkLodProcessor;
+import net.conczin.immersive_worldmap.lod.LodChunkData;
 import net.conczin.immersive_worldmap.util.TickLruCache;
 
 public final class LodChunkMeshManager {
@@ -28,7 +29,7 @@ public final class LodChunkMeshManager {
     }
 
     public void invalidate(int cx, int cz, int lod, String dimension) {
-        for (int parentLod = lod; parentLod <= LodChunkVisibilitySelector.TOP_LOD; parentLod++) {
+        for (int parentLod = lod; parentLod <= LodChunkData.MAX_LOD; parentLod++) {
             LodChunkMesh mesh = cache.get(new ChunkLodProcessor.CacheKey(cx, cz, dimension, parentLod));
             if (mesh != null) mesh.markDirty();
             cx = Math.floorDiv(cx, 2);

@@ -1,6 +1,7 @@
 package net.conczin.immersive_worldmap.renderer;
 
 import net.conczin.immersive_worldmap.lod.ChunkLodProcessor;
+import net.conczin.immersive_worldmap.lod.LodChunkData;
 import net.conczin.immersive_worldmap.util.CircularChunkIterator;
 import org.joml.FrustumIntersection;
 import org.joml.Matrix4f;
@@ -23,8 +24,6 @@ public class LodChunkVisibilitySelector {
             INSTANCE = null;
         }
     }
-
-    public static final int TOP_LOD = 5;
 
     private static final float CHUNK_HEIGHT = 384f;
     private static final int CHUNK_SIZE = 16;
@@ -97,7 +96,7 @@ public class LodChunkVisibilitySelector {
         FrustumIntersection frustum = new FrustumIntersection(snapshot.viewProjection());
         int targetLod = selectLod(snapshot);
         double radius = Math.ceil(snapshot.zoom() / CHUNK_SIZE * RENDER_DISTANCE);
-        float rootWorldSize = worldSize(TOP_LOD);
+        float rootWorldSize = worldSize(LodChunkData.MAX_LOD);
         int centerX = (int) Math.floor(snapshot.focusX() / rootWorldSize);
         int centerZ = (int) Math.floor(snapshot.focusZ() / rootWorldSize);
         int rootRadius = (int) Math.ceil(radius / rootWorldSize) + 1;
@@ -105,7 +104,7 @@ public class LodChunkVisibilitySelector {
         CircularChunkIterator roots = new CircularChunkIterator(centerX, centerZ, rootRadius);
         while (roots.hasNext()) {
             int[] root = roots.next();
-            visit(root[0], root[1], TOP_LOD, targetLod, radius, snapshot, frustum,
+            visit(root[0], root[1], LodChunkData.MAX_LOD, targetLod, radius, snapshot, frustum,
                     loadedMeshes, targetMeshes, selected);
         }
 
@@ -121,7 +120,7 @@ public class LodChunkVisibilitySelector {
 
     private int selectLod(CameraSnapshot snapshot) {
         int lod = (int) Math.floor(Math.log(Math.max(snapshot.zoom(), 1f) / (CHUNK_SIZE * SUBDIVIDE_DISTANCE_FACTOR)) / LOG_2);
-        return Math.clamp(lod, 0, TOP_LOD);
+        return Math.clamp(lod, 0, LodChunkData.MAX_LOD);
     }
 
     private boolean visit(

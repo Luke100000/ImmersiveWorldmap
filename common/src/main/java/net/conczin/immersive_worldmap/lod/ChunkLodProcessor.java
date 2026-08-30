@@ -2,6 +2,7 @@ package net.conczin.immersive_worldmap.lod;
 
 import net.conczin.immersive_worldmap.ImmersiveWorldmap;
 import net.conczin.immersive_worldmap.database.DatabaseManager;
+import net.conczin.immersive_worldmap.database.ChunkLodDatabase;
 import net.conczin.immersive_worldmap.renderer.LodChunkMeshManager;
 import net.conczin.immersive_worldmap.util.ThreadPoolUtil;
 import net.conczin.immersive_worldmap.util.PriorityThreadPoolExecutor;
@@ -33,6 +34,7 @@ public class ChunkLodProcessor {
 
     public static void shutdown() {
         EXECUTOR.shutdownNow();
+        EXECUTOR.close();
     }
 
     public static void clearGeneratedLods(String dimension) {
@@ -144,38 +146,19 @@ public class ChunkLodProcessor {
     }
 
     private static CompletableFuture<LodChunkData> loadLodAsync(CacheKey key) {
-        return EXECUTOR.submit(key.lod(), key, () -> loadStoredLod(key)).thenCompose(stored -> {
-            if (hasStoredLod(key)) {
-                if (key.lod() > 0 && takeDirty(key)) {
+        return EXECUTOR.submit(key.lod(), key, () -> loadStoredChunk(key)).thenCompose(stored -> {
+            if (stored.exists()) {
+                if (key.lod() > 0 && stored.dirty()) {
                     regenerateDirtyLodAsync(key);
                 }
-                return CompletableFuture.completedFuture(new LodChunkData(key.chunkX(), key.chunkZ(), key.dimension(), key.lod(), stored));
+                return CompletableFuture.completedFuture(new LodChunkData(
+                        key.chunkX(), key.chunkZ(), key.dimension(), key.lod(), stored.colors()));
             }
             if (key.lod() == 0) {
                 return CompletableFuture.completedFuture(new LodChunkData(key.chunkX(), key.chunkZ(), key.dimension(), 0, null));
             }
             return generateLodAsync(key);
         });
-    }
-
-    private static boolean hasStoredLod(CacheKey key) {
-        if (!DatabaseManager.isInitialized()) return false;
-        try {
-            return DatabaseManager.getInstance().hasChunk(key.chunkX(), key.chunkZ(), key.dimension(), key.lod());
-        } catch (SQLException e) {
-            ImmersiveWorldmap.LOGGER.warn("Failed to check chunk LOD data: {}", e.getMessage());
-            return false;
-        }
-    }
-
-    private static boolean takeDirty(CacheKey key) {
-        if (!DatabaseManager.isInitialized()) return false;
-        try {
-            return DatabaseManager.getInstance().takeDirty(key.chunkX(), key.chunkZ(), key.dimension(), key.lod());
-        } catch (SQLException e) {
-            ImmersiveWorldmap.LOGGER.warn("Failed to claim dirty chunk LOD data: {}", e.getMessage());
-            return false;
-        }
     }
 
     private static void markDirty(CacheKey key) {
@@ -208,13 +191,13 @@ public class ChunkLodProcessor {
         });
     }
 
-    private static byte[] loadStoredLod(CacheKey key) {
-        if (!DatabaseManager.isInitialized()) return null;
+    private static ChunkLodDatabase.StoredChunk loadStoredChunk(CacheKey key) {
+        if (!DatabaseManager.isInitialized()) return new ChunkLodDatabase.StoredChunk(false, null, false);
         try {
-            return DatabaseManager.getInstance().getChunkColors(key.chunkX(), key.chunkZ(), key.dimension(), key.lod());
+            return DatabaseManager.getInstance().loadChunk(key.chunkX(), key.chunkZ(), key.dimension(), key.lod());
         } catch (SQLException e) {
             ImmersiveWorldmap.LOGGER.warn("Failed to retrieve chunk LOD data: {}", e.getMessage());
-            return null;
+            return new ChunkLodDatabase.StoredChunk(false, null, false);
         }
     }
 
