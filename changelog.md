@@ -1,16 +1,18 @@
 # TODO
 
-* Port to 1.21.1 and sync multiloader
 * Deduplicate incoming chunks (hash? Time?)
 * Screen transition
-* Make sure screen does not render background
+* Make sure the screen does not render background
 * Finalize screen
 * Markers
 * Cave viewer
-* Make sure v1 is not blocked (database can be moved safely)
+    * 2x2 median filtered +-8 search cut
+* Culling
+    * Search downwards for the first solid block, treat this as lower bound
+* Fade out
 * Debug view
 * Profiling and maybe batching, especially the air-chunks
-* Install chunky in dev
+* Is the renderer good or too many CPU bound calls?
 
 # V1
 

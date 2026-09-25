@@ -3,6 +3,13 @@ plugins {
     id 'net.neoforged.moddev'
 }
 
+repositories {
+    maven {
+        name = "Modrinth"
+        url = "https://api.modrinth.com/maven"
+    }
+}
+
 neoForge {
     version = neoforge_version
     // Automatically enable neoforge AccessTransformers if the file exists
@@ -39,4 +46,5 @@ neoForge {
 dependencies {
     implementation("org.xerial:sqlite-jdbc:3.45.2.0")
     implementation("org.lz4:lz4-java:1.8.0")
+    runtimeOnly "maven.modrinth:chunky:${chunky_neoforge_version}"
 }
