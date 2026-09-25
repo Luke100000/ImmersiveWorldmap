@@ -33,12 +33,11 @@ public class ImmersiveWorldmap {
     }
 
     public static void start() {
-        ChunkLodProcessor.start();
-        LodChunkMeshManager.INSTANCE.clear();
-
         if (DatabaseManager.isInitialized()) {
+            ChunkLodProcessor.shutdown();
             DatabaseManager.shutdown();
         }
+        LodChunkMeshManager.INSTANCE.clear();
 
         String identifier = getWorldIdentifier();
 
@@ -46,6 +45,7 @@ public class ImmersiveWorldmap {
                 .resolve("immersiveworldmap")
                 .resolve(identifier + ".db");
         DatabaseManager.initialize(dbPath);
+        ChunkLodProcessor.start();
     }
 
     private static String getWorldIdentifier() {

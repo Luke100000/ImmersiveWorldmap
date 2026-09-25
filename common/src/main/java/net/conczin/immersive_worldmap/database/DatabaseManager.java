@@ -7,7 +7,7 @@ import java.nio.file.Path;
  * Utility class for managing the chunk LOD database.
  */
 public class DatabaseManager {
-    private static ChunkLodDatabase INSTANCE;
+    private static volatile ChunkLodDatabase INSTANCE;
     private static final Object LOCK = new Object();
 
     /**
@@ -65,5 +65,3 @@ public class DatabaseManager {
         }
     }
 }
-
-

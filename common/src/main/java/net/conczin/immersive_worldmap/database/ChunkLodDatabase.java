@@ -35,9 +35,10 @@ public class ChunkLodDatabase implements AutoCloseable {
             throw new RuntimeException("SQLite JDBC driver not found", e);
         }
         this.databaseUrl = "jdbc:sqlite:" + databasePath.toAbsolutePath();
-        try (Connection connection = openConnection();
-             Statement statement = connection.createStatement()) {
-            statement.execute("PRAGMA journal_mode=WAL");
+        try (Connection connection = openConnection()) {
+            try (Statement statement = connection.createStatement()) {
+                statement.execute("PRAGMA journal_mode=WAL");
+            }
             initializeSchema(connection);
         } catch (SQLException e) {
             throw new RuntimeException("Failed to initialize database at " + databasePath, e);
