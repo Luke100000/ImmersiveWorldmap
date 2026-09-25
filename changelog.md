@@ -5,10 +5,8 @@
 * Make sure the screen does not render background
 * Finalize screen
 * Markers
-* Cave viewer
-    * 2x2 median filtered +-8 search cut
 * Culling
-    * Search downwards for the first solid block, treat this as lower bound
+    * Probably by 16^3 air flood fill rendering trick
 * Fade out
 * Debug view
 * Profiling and maybe batching, especially the air-chunks

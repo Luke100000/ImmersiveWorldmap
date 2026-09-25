@@ -6,6 +6,7 @@ import net.conczin.immersive_worldmap.lod.ChunkLodProcessor;
 import net.conczin.immersive_worldmap.renderer.LodChunkMeshManager;
 import net.conczin.immersive_worldmap.renderer.LodChunkVisibilitySelector;
 import net.conczin.immersive_worldmap.renderer.LodChunkMesh;
+import net.conczin.immersive_worldmap.settings.SharedSettings;
 import net.minecraft.client.Minecraft;
 import net.minecraft.client.gui.GuiGraphics;
 import net.minecraft.client.gui.components.Button;
@@ -13,17 +14,35 @@ import net.minecraft.client.gui.screens.Screen;
 import net.minecraft.network.chat.Component;
 import org.joml.Matrix4f;
 
+import java.util.HashSet;
 import java.util.List;
+import java.util.Set;
 
 public class LodViewerScreen extends Screen {
+    private static final int KEY_ESCAPE = 256;
+    private static final int KEY_TAB = 258;
+    private static final int KEY_DOWN = 264;
+    private static final int KEY_UP = 265;
+    private static final int CAVE_OFFSET_STEP = 8;
+
     private final Minecraft minecraft;
     private String dimension;
     private final Camera3D camera = new Camera3D();
 
+    private int caveBaselineY = 0;
+    private final Set<Integer> heldCaveKeys = new HashSet<>();
+
     public LodViewerScreen() {
         super(Component.literal("LOD Chunk Viewer"));
+
         this.minecraft = Minecraft.getInstance();
+
+        boolean staleCaveMeshes = SharedSettings.caveView;
         loadState();
+        resetCaveView();
+        if (staleCaveMeshes) {
+            clearMeshes();
+        }
     }
 
     private void loadState() {
@@ -34,6 +53,13 @@ public class LodViewerScreen extends Screen {
                 (float) (minecraft.player.getY() - minecraft.level.getMinBuildHeight()),
                 (float) minecraft.player.getZ());
         camera.setZoom(500f);
+
+        caveBaselineY = (int) Math.floor(minecraft.player.getY()) - minecraft.level.getMinBuildHeight();
+    }
+
+    private void resetCaveView() {
+        SharedSettings.caveView = false;
+        SharedSettings.caveViewBaselineY = caveBaselineY;
     }
 
     @Override
@@ -87,14 +113,38 @@ public class LodViewerScreen extends Screen {
 
     @Override
     public boolean keyPressed(int keyCode, int scanCode, int modifiers) {
-        if (keyCode != 256 && camera.keyPressed(keyCode)) return true;
+        if (isCaveKey(keyCode)) {
+            if (heldCaveKeys.add(keyCode)) {
+                switch (keyCode) {
+                    case KEY_TAB -> SharedSettings.caveView = !SharedSettings.caveView;
+                    case KEY_UP -> SharedSettings.caveViewBaselineY += CAVE_OFFSET_STEP;
+                    case KEY_DOWN -> SharedSettings.caveViewBaselineY -= CAVE_OFFSET_STEP;
+                }
+                clearMeshes();
+            }
+            return true;
+        }
+
+        if (keyCode != KEY_ESCAPE && camera.keyPressed(keyCode)) {
+            return true;
+        }
+
         return super.keyPressed(keyCode, scanCode, modifiers);
     }
 
     @Override
     public boolean keyReleased(int keyCode, int scanCode, int modifiers) {
-        if (camera.keyReleased(keyCode)) return true;
+        heldCaveKeys.remove(keyCode);
+
+        if (camera.keyReleased(keyCode)) {
+            return true;
+        }
+
         return super.keyReleased(keyCode, scanCode, modifiers);
+    }
+
+    private static boolean isCaveKey(int keyCode) {
+        return keyCode == KEY_TAB || keyCode == KEY_UP || keyCode == KEY_DOWN;
     }
 
     @Override
@@ -132,15 +182,23 @@ public class LodViewerScreen extends Screen {
         graphics.drawCenteredString(this.font, this.title, this.width / 2, 20, 0xFFFFFF);
         graphics.drawString(this.font, "Dimension: " + dimension, 20, 40, 0xFFFFFF);
         graphics.drawString(this.font, "Tasks: " + ChunkLodProcessor.EXECUTOR.getProcessedTasks()
-                + " / " + ChunkLodProcessor.EXECUTOR.getTotalTasks(), 20, 52, 0xFFFFFF);
+                                       + " / " + ChunkLodProcessor.EXECUTOR.getTotalTasks(), 20, 52, 0xFFFFFF);
         graphics.drawString(this.font, "Visible chunks: " + visible.size(), 20, 64, 0xFFFFFF);
         graphics.drawString(this.font, "Caches: mesh " + LodChunkMeshManager.INSTANCE.getCacheSize()
-                + "  LOD " + ChunkLodProcessor.getCacheSize(), 20, 76, 0xFFFFFF);
+                                       + "  LOD " + ChunkLodProcessor.getCacheSize(), 20, 76, 0xFFFFFF);
         graphics.drawString(this.font,
                 String.format("Zoom: %.1f  Yaw: %.1f  Pitch: %.1f",
                         camera.getSmoothZoom(), camera.getSmoothYaw(), camera.getSmoothPitch()),
                 20, 88, 0xAAAAAA);
-        graphics.drawString(this.font, "LMB: orbit   RMB: pan   Wheel: zoom   WASD: pan", 20, this.height - 20, 0x888888);
+
+        int caveOffset = SharedSettings.caveViewBaselineY - caveBaselineY;
+        graphics.drawString(this.font,
+                "Cave view: " + (SharedSettings.caveView ? "ON" : "OFF")
+                + "  slice Y=" + SharedSettings.caveViewBaselineY
+                + "  offset=" + (caveOffset >= 0 ? "+" : "") + caveOffset,
+                20, 100, SharedSettings.caveView ? 0xFFAA55 : 0xAAAAAA);
+        graphics.drawString(this.font, "LMB: orbit   RMB: pan   Wheel: zoom   WASD: pan   Tab: cave view   Up/Down: slice",
+                20, this.height - 20, 0x888888);
 
         if (visible.isEmpty()) {
             graphics.drawCenteredString(this.font, "Loading...", this.width / 2, this.height / 2, 0xFFFF55);
