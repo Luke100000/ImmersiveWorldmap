@@ -14,7 +14,7 @@ displayURL = "${mod_homepage}"
 logoFile = "icon.png"
 credits = "${credits}"
 authors = "${mod_author}"
-description = '''${description}''' (Supports multiline text)
+description = '''${description}'''
 displayTest="IGNORE_SERVER_VERSION"
 
 [[dependencies.${mod_id}]]
