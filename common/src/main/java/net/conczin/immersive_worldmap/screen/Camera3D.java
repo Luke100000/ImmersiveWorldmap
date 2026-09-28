@@ -6,7 +6,7 @@ public class Camera3D {
     private static final float DECAY_HALF_LIFE = 0.05f;
     private static final float VELOCITY_EPSILON = 0.001f;
 
-    private static final float ZOOM_MIN = 1f;
+    private static final float ZOOM_MIN = 96f;
     private static final float ZOOM_MAX = 10000f;
     private static final float PITCH_MIN = -89.9f;
     private static final float PITCH_MAX = -25f;

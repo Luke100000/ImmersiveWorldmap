@@ -1,7 +1,6 @@
 package net.conczin.immersive_worldmap.screen;
 
 import com.mojang.blaze3d.systems.RenderSystem;
-import net.conczin.immersive_worldmap.database.DatabaseManager;
 import net.conczin.immersive_worldmap.lod.ChunkLodProcessor;
 import net.conczin.immersive_worldmap.renderer.LodChunkMesh;
 import net.conczin.immersive_worldmap.renderer.LodChunkMeshManager;
@@ -10,9 +9,9 @@ import net.conczin.immersive_worldmap.renderer.LodChunkVisibilitySelector;
 import net.conczin.immersive_worldmap.settings.SharedSettings;
 import net.minecraft.client.Minecraft;
 import net.minecraft.client.gui.GuiGraphics;
-import net.minecraft.client.gui.components.Button;
 import net.minecraft.client.gui.screens.Screen;
 import net.minecraft.network.chat.Component;
+import net.minecraft.world.level.LightLayer;
 import org.joml.Matrix4f;
 
 import java.util.HashSet;
@@ -24,13 +23,12 @@ public class LodViewerScreen extends Screen {
     private static final int KEY_TAB = 258;
     private static final int KEY_DOWN = 264;
     private static final int KEY_UP = 265;
-    private static final int CAVE_OFFSET_STEP = 8;
+    private static final int CAVE_OFFSET_STEP = 16;
 
     private final Minecraft minecraft;
     private String dimension;
     private final Camera3D camera = new Camera3D();
 
-    private int caveBaselineY = 0;
     private final Set<Integer> heldKeys = new HashSet<>();
 
     public LodViewerScreen() {
@@ -38,10 +36,11 @@ public class LodViewerScreen extends Screen {
 
         this.minecraft = Minecraft.getInstance();
 
-        boolean staleCaveMeshes = SharedSettings.caveView;
+        boolean previousCaveView = SharedSettings.caveView;
+        int previousBaselineY = SharedSettings.caveViewBaselineY;
         loadState();
-        resetCaveView();
-        if (staleCaveMeshes) {
+        if (previousCaveView != SharedSettings.caveView
+                || (SharedSettings.caveView && previousBaselineY != SharedSettings.caveViewBaselineY)) {
             clearMeshes();
         }
     }
@@ -53,34 +52,9 @@ public class LodViewerScreen extends Screen {
         camera.setTarget((float) minecraft.player.getX(),
                 (float) (minecraft.player.getY() - minecraft.level.getMinBuildHeight()),
                 (float) minecraft.player.getZ());
-        camera.setZoom(500f);
-
-        caveBaselineY = (int) Math.floor(minecraft.player.getY()) - minecraft.level.getMinBuildHeight();
-    }
-
-    private void resetCaveView() {
-        SharedSettings.caveView = false;
-        SharedSettings.caveViewBaselineY = caveBaselineY;
-    }
-
-    @Override
-    protected void init() {
-        super.init();
-        addRenderableWidget(Button.builder(Component.literal("Clear LODs"), button -> clearGeneratedLods())
-                .bounds(this.width - 250, 20, 110, 20)
-                .build());
-        addRenderableWidget(Button.builder(Component.literal("Clear meshes"), button -> clearMeshes())
-                .bounds(this.width - 130, 20, 110, 20)
-                .build());
-    }
-
-    private void clearGeneratedLods() {
-        if (dimension == null || !DatabaseManager.isInitialized()) {
-            return;
-        }
-        ChunkLodProcessor.clearGeneratedLods(dimension);
-        LodChunkVisibilitySelector.reset();
-        LodChunkMeshManager.INSTANCE.clear();
+        SharedSettings.caveView = minecraft.level.getBrightness(LightLayer.SKY, minecraft.player.blockPosition()) == 0;
+        SharedSettings.caveViewBaselineY = (int) Math.floor(minecraft.player.getY()) - minecraft.level.getMinBuildHeight();
+        camera.setZoom(SharedSettings.caveView ? 200f : 500f);
     }
 
     private void clearMeshes() {
@@ -179,16 +153,6 @@ public class LodViewerScreen extends Screen {
         }
 
         List<LodChunkMesh> visible = LodChunkVisibilitySelector.get().visibleChunks();
-
-        graphics.drawCenteredString(this.font, this.title, this.width / 2, 20, 0xFFFFFF);
-        graphics.drawString(this.font, "Dimension: " + dimension, 20, 40, 0xFFFFFF);
-
-        int caveOffset = SharedSettings.caveViewBaselineY - caveBaselineY;
-        graphics.drawString(this.font,
-                "Cave view: " + (SharedSettings.caveView ? "ON" : "OFF")
-                + "  slice Y=" + SharedSettings.caveViewBaselineY
-                + "  offset=" + (caveOffset >= 0 ? "+" : "") + caveOffset,
-                20, 52, SharedSettings.caveView ? 0xFFAA55 : 0xAAAAAA);
 
         graphics.drawString(this.font, "LMB: orbit   RMB: pan   Wheel: zoom   WASD: pan   Tab: cave view   Up/Down: slice",
                 20, this.height - 20, 0x888888);

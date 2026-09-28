@@ -15,14 +15,15 @@ import java.util.concurrent.CompletableFuture;
  */
 public class LodChunkMeshBuilder {
     private static final byte[] EMPTY = new byte[0];
+
     // How many blocks of wall are kept above the cave view baseline.
-    private static final int CAVE_WALL_HEIGHT = 32;
+    private static final int CAVE_WALL_HEIGHT = 8;
 
     // Slack kept below the floor, so a sloping surface is never cut into
     private static final int FLOOR_BUFFER = 8;
 
     // Brightness multiplier of the top face at the cave view slice.
-    private static final float CAVE_TOP_BRIGHTNESS = 0.25F;
+    private static final float CAVE_TOP_BRIGHTNESS = 0.33F;
 
     /**
      * Builds a mesh from chunk coordinates.
@@ -67,7 +68,7 @@ public class LodChunkMeshBuilder {
         neighbors = neighbors.withSlice(SharedSettings.caveView ? new CaveSlice(neighbors, baseline) : null);
         CaveSlice slice = neighbors.slice();
 
-        int floor = Math.max(0, getMinSurrounding(neighbors) - FLOOR_BUFFER);
+        int floor = slice == null ? Math.max(0, getMinSurrounding(neighbors) - FLOOR_BUFFER) : 0;
 
         Tesselator tesselator = TesselatorPool.acquire();
         try {
@@ -104,8 +105,12 @@ public class LodChunkMeshBuilder {
                         int g = color[1];
                         int r = color[2];
 
-                        // Add noise
-                        int noise = (int) ((Math.random() - 0.5) * 16);
+                        // Add nosie
+                        int noise = positionNoise(
+                                (center.chunkX() * 16 + x) << lod,
+                                y << lod,
+                                (center.chunkZ() * 16 + z) << lod
+                        );
                         r = Math.clamp(r + noise, 0, 255);
                         g = Math.clamp(g + noise, 0, 255);
                         b = Math.clamp(b + noise, 0, 255);
@@ -256,6 +261,14 @@ public class LodChunkMeshBuilder {
 
     private static int getSurface(LodChunkData chunk) {
         return chunk == null || chunk.empty() ? 0 : chunk.minSurface();
+    }
+
+    private static int positionNoise(int x, int y, int z) {
+        int hash = x * 73428767 ^ y * 912931 ^ z * 438289;
+        hash ^= hash >>> 16;
+        hash *= 0x7feb352d;
+        hash ^= hash >>> 15;
+        return Math.floorMod(hash, 15) - 7;
     }
 
     private record VertexWriter(BufferBuilder builder, int xOffset, int zOffset) {
