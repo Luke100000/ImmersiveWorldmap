@@ -1,10 +1,10 @@
 package net.conczin.immersive_worldmap.renderer;
 
-import com.mojang.blaze3d.systems.RenderSystem;
 import com.mojang.blaze3d.vertex.MeshData;
 import com.mojang.blaze3d.vertex.VertexBuffer;
 import net.conczin.immersive_worldmap.ImmersiveWorldmap;
 import net.minecraft.client.renderer.GameRenderer;
+import net.minecraft.client.renderer.ShaderInstance;
 import org.joml.Matrix4f;
 
 import java.util.concurrent.CancellationException;
@@ -22,7 +22,9 @@ public class LodChunkMesh {
     private volatile boolean dirty = true;
     private volatile boolean requested;
     private volatile boolean loaded;
+    private volatile int faces;
     private final AtomicLong revision = new AtomicLong();
+    private final Matrix4f localMv = new Matrix4f();
     private VertexBuffer vertexBuffer;
 
     public LodChunkMesh(int chunkX, int chunkZ, int lod, String dimension) {
@@ -66,8 +68,8 @@ public class LodChunkMesh {
         return false;
     }
 
-    // Must be called from the render thread.
-    public void draw(Matrix4f mv, Matrix4f proj) {
+    // Must be called from the render thread. Returns the faces submitted, for the viewer's counter.
+    public int draw(Matrix4f mv, Matrix4f proj) {
         if (pendingMeshReady) {
             if (vertexBuffer != null) {
                 vertexBuffer.close();
@@ -77,27 +79,28 @@ public class LodChunkMesh {
             pendingMesh = null;
             pendingMeshReady = false;
         }
-        if (mesh == null) return;
+        if (mesh == null) return 0;
         if (vertexBuffer == null) {
+            MeshData.DrawState drawState = mesh.drawState();
             vertexBuffer = new VertexBuffer(VertexBuffer.Usage.STATIC);
             vertexBuffer.bind();
+            // upload() closes the mesh data
             vertexBuffer.upload(mesh);
             VertexBuffer.unbind();
+            faces = drawState.vertexCount() / 4;
         }
-        RenderSystem.setShader(GameRenderer::getPositionColorShader);
-        var shader = RenderSystem.getShader();
-        if (shader == null) return;
+        ShaderInstance shader = GameRenderer.getPositionColorShader();
+        if (shader == null) return 0;
 
         float scale = 1 << lod;
-        float worldX = chunkX * 16f * scale;
-        float worldZ = chunkZ * 16f * scale;
-        Matrix4f localMv = new Matrix4f(mv)
-                .translate(worldX, 0, worldZ)
+        localMv.set(mv)
+                .translate(chunkX * 16f * scale, 0, chunkZ * 16f * scale)
                 .scale(scale, scale, scale);
 
         vertexBuffer.bind();
         vertexBuffer.drawWithShader(localMv, proj, shader);
         VertexBuffer.unbind();
+        return faces;
     }
 
     public void close() {
@@ -107,6 +110,7 @@ public class LodChunkMesh {
         dirty = true;
         requested = false;
         loaded = false;
+        faces = 0;
         if (vertexBuffer != null) {
             vertexBuffer.close();
             vertexBuffer = null;

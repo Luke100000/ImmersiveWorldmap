@@ -15,7 +15,10 @@ import java.util.concurrent.CompletableFuture;
  */
 public class LodChunkMeshBuilder {
     // How many blocks of wall are kept above the cave view baseline.
-    private static final int CAVE_WALL_HEIGHT = 8;
+    private static final int CAVE_WALL_HEIGHT = 32;
+
+    // Slack kept below the floor, so a sloping surface is never cut into
+    private static final int FLOOR_BUFFER = 8;
 
     // Brightness multiplier of the top face at the cave view slice.
     private static final float CAVE_TOP_BRIGHTNESS = 0.25F;
@@ -58,12 +61,12 @@ public class LodChunkMeshBuilder {
         LodChunkData center = neighbors.center();
         if (center.empty()) return null;
 
-        if (SharedSettings.caveView) {
-            // One LOD block covers 1 << lod world blocks, so the baseline has to be scaled down
-            int baseline = Math.clamp(Math.floorDiv(SharedSettings.caveViewBaselineY, 1 << lod), 0, Math.max(0, center.getHeight() - 1));
-            neighbors = neighbors.withSlice(new CaveSlice(neighbors, baseline));
-        }
+        // One LOD block covers 1 << lod world blocks, so the baseline has to be scaled down
+        int baseline = Math.clamp(Math.floorDiv(SharedSettings.caveViewBaselineY, 1 << lod), 0, Math.max(0, center.getHeight() - 1));
+        neighbors = neighbors.withSlice(SharedSettings.caveView ? new CaveSlice(neighbors, baseline) : null);
         CaveSlice slice = neighbors.slice();
+
+        int floor = Math.max(0, getMinSurrounding(neighbors) - FLOOR_BUFFER);
 
         Tesselator tesselator = TesselatorPool.acquire();
         try {
@@ -73,14 +76,13 @@ public class LodChunkMeshBuilder {
 
             // Different shading for each face direction
             float topBrightness = 1.0F;
-            float bottomBrightness = 0.5F;
             float sideBrightness = 0.8F;
             float sideEWBrightness = 0.72F; // 0.8 * 0.9
             boolean hasFaces = false;
 
             // Iterate through all blocks and render visible faces
             for (int x = 0; x < 16; x++) {
-                for (int y = 0; y < height; y++) {
+                for (int y = floor; y < height; y++) {
                     for (int z = 0; z < 16; z++) {
                         if (slice != null && y > slice.centerCut(x, z)) {
                             // Cave view: everything above the column's slice is hidden
@@ -104,16 +106,13 @@ public class LodChunkMeshBuilder {
                         g = Math.clamp(g + noise, 0, 255);
                         b = Math.clamp(b + noise, 0, 255);
 
-                        float topMul = (slice != null && y == slice.centerCut(x, z)) ? CAVE_TOP_BRIGHTNESS : 1.0F;
+                        float topMul = (slice != null && y == slice.centerCut(x, z) && center.getBlock(x, y + 1, z) != 0)
+                                ? CAVE_TOP_BRIGHTNESS : 1.0F;
 
                         // Pre-calculate brightness-adjusted colors for each face direction
                         float rTop = r * topBrightness * topMul;
                         float gTop = g * topBrightness * topMul;
                         float bTop = b * topBrightness * topMul;
-
-                        float rBottom = r * bottomBrightness;
-                        float gBottom = g * bottomBrightness;
-                        float bBottom = b * bottomBrightness;
 
                         float rSide = r * sideBrightness;
                         float gSide = g * sideBrightness;
@@ -144,26 +143,6 @@ public class LodChunkMeshBuilder {
                                 v(builder, x1, y1, z1, rTop, gTop, bTop, ao11);
                                 v(builder, x1, y1, z, rTop, gTop, bTop, ao10);
                                 v(builder, x, y1, z, rTop, gTop, bTop, ao00);
-                            }
-                        }
-
-                        // Bottom face (Y-)
-                        //noinspection PointlessBooleanExpression
-                        if (neighbors.isAir(x, y - 1, z) && false) {
-                            float ao00 = vertexAO(neighbors, x - 1, y - 1, z, x, y - 1, z - 1, x - 1, y - 1, z - 1);
-                            float ao10 = vertexAO(neighbors, x + 1, y - 1, z, x, y - 1, z - 1, x + 1, y - 1, z - 1);
-                            float ao11 = vertexAO(neighbors, x + 1, y - 1, z, x, y - 1, z + 1, x + 1, y - 1, z + 1);
-                            float ao01 = vertexAO(neighbors, x - 1, y - 1, z, x, y - 1, z + 1, x - 1, y - 1, z + 1);
-                            if (ao00 + ao11 > ao01 + ao10) {
-                                v(builder, x, y, z, rBottom, gBottom, bBottom, ao00);
-                                v(builder, x, y, z1, rBottom, gBottom, bBottom, ao01);
-                                v(builder, x1, y, z1, rBottom, gBottom, bBottom, ao11);
-                                v(builder, x1, y, z, rBottom, gBottom, bBottom, ao10);
-                            } else {
-                                v(builder, x, y, z, rBottom, gBottom, bBottom, ao00);
-                                v(builder, x1, y, z, rBottom, gBottom, bBottom, ao10);
-                                v(builder, x1, y, z1, rBottom, gBottom, bBottom, ao11);
-                                v(builder, x, y, z1, rBottom, gBottom, bBottom, ao01);
                             }
                         }
 
@@ -256,6 +235,20 @@ public class LodChunkMeshBuilder {
         }
     }
 
+    // Lowest stored surface of a chunk and its four direct neighbors
+    private static int getMinSurrounding(ChunkNeighborhood neighbors) {
+        int min = getSurface(neighbors.center());
+        min = Math.min(min, getSurface(neighbors.north()));
+        min = Math.min(min, getSurface(neighbors.south()));
+        min = Math.min(min, getSurface(neighbors.west()));
+        min = Math.min(min, getSurface(neighbors.east()));
+        return min;
+    }
+
+    private static int getSurface(LodChunkData chunk) {
+        return chunk == null || chunk.empty() ? 0 : chunk.minSurface();
+    }
+
     private static void v(BufferBuilder b, float x, float y, float z, float r, float g, float col, float ao) {
         b.addVertex(x, y, z).setColor((int) (r * ao), (int) (g * ao), (int) (col * ao), 255);
     }
@@ -304,14 +297,17 @@ public class LodChunkMeshBuilder {
         }
 
         private boolean isAir(int x, int y, int z) {
+            // Cells the cave slice hides return as air so its cut face gets drawn
             if (slice != null && slice.isHidden(x, y, z)) {
-                // Cave view hides everything above the column's slice
                 return true;
             }
-            int chunkX = Math.floorDiv(x, 16);
-            int chunkZ = Math.floorDiv(z, 16);
-            LodChunkData chunk = getChunk(chunkX, chunkZ);
-            return chunk == null || chunk.getBlock(Math.floorMod(x, 16), y, Math.floorMod(z, 16)) == 0;
+            return blockAt(x, y, z) == 0;
+        }
+
+        // Raw block color id of a cell, 0 for air and for anything outside the loaded chunks
+        private int blockAt(int x, int y, int z) {
+            LodChunkData chunk = getChunk(Math.floorDiv(x, 16), Math.floorDiv(z, 16));
+            return chunk == null ? 0 : chunk.getBlock(Math.floorMod(x, 16), y, Math.floorMod(z, 16));
         }
 
         private LodChunkData getChunk(int chunkX, int chunkZ) {

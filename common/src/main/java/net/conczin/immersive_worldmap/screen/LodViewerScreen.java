@@ -30,7 +30,7 @@ public class LodViewerScreen extends Screen {
     private final Camera3D camera = new Camera3D();
 
     private int caveBaselineY = 0;
-    private final Set<Integer> heldCaveKeys = new HashSet<>();
+    private final Set<Integer> heldKeys = new HashSet<>();
 
     public LodViewerScreen() {
         super(Component.literal("LOD Chunk Viewer"));
@@ -114,7 +114,7 @@ public class LodViewerScreen extends Screen {
     @Override
     public boolean keyPressed(int keyCode, int scanCode, int modifiers) {
         if (isCaveKey(keyCode)) {
-            if (heldCaveKeys.add(keyCode)) {
+            if (heldKeys.add(keyCode)) {
                 switch (keyCode) {
                     case KEY_TAB -> SharedSettings.caveView = !SharedSettings.caveView;
                     case KEY_UP -> SharedSettings.caveViewBaselineY += CAVE_OFFSET_STEP;
@@ -134,7 +134,7 @@ public class LodViewerScreen extends Screen {
 
     @Override
     public boolean keyReleased(int keyCode, int scanCode, int modifiers) {
-        heldCaveKeys.remove(keyCode);
+        heldKeys.remove(keyCode);
 
         if (camera.keyReleased(keyCode)) {
             return true;
@@ -197,6 +197,7 @@ public class LodViewerScreen extends Screen {
                 + "  slice Y=" + SharedSettings.caveViewBaselineY
                 + "  offset=" + (caveOffset >= 0 ? "+" : "") + caveOffset,
                 20, 100, SharedSettings.caveView ? 0xFFAA55 : 0xAAAAAA);
+
         graphics.drawString(this.font, "LMB: orbit   RMB: pan   Wheel: zoom   WASD: pan   Tab: cave view   Up/Down: slice",
                 20, this.height - 20, 0x888888);
 
@@ -209,12 +210,15 @@ public class LodViewerScreen extends Screen {
         RenderSystem.disableBlend();
         RenderSystem.enableCull();
 
+        int faces = 0;
         for (LodChunkMesh rs : visible) {
-            rs.draw(mv, proj);
+            faces += rs.draw(mv, proj);
         }
 
         RenderSystem.disableCull();
         RenderSystem.disableDepthTest();
+
+        graphics.drawString(this.font, String.format("Faces: %,d", faces), 20, 124, 0x55FFAA);
     }
 
     @Override

@@ -9,7 +9,7 @@ import java.util.Set;
 import java.util.concurrent.ConcurrentHashMap;
 
 public class ChunkLodDatabase implements AutoCloseable {
-    public record StoredChunk(boolean exists, byte[] colors, boolean dirty) {
+    public record StoredChunk(boolean exists, byte[] colors, boolean dirty, int minSurface) {
     }
 
     @FunctionalInterface
@@ -75,6 +75,7 @@ public class ChunkLodDatabase implements AutoCloseable {
                         dimension TEXT NOT NULL,
                         lod INTEGER NOT NULL,
                         colors BLOB,
+                        min_surface INTEGER NOT NULL DEFAULT 0,
                         empty INTEGER NOT NULL DEFAULT 0,
                         dirty INTEGER NOT NULL DEFAULT 0,
                         PRIMARY KEY (x, z, dimension, lod)
@@ -105,9 +106,9 @@ public class ChunkLodDatabase implements AutoCloseable {
      * @param colors    the binary color data
      * @throws SQLException if a database access error occurs
      */
-    public void upsertChunk(int x, int z, String dimension, int lod, byte[] colors) throws SQLException {
+    public void upsertChunk(int x, int z, String dimension, int lod, byte[] colors, int minSurface) throws SQLException {
         inTransaction(connection -> {
-            upsertChunkRow(connection, x, z, dimension, lod, colors);
+            upsertChunkRow(connection, x, z, dimension, lod, colors, minSurface);
             markParentsDirty(connection, x, z, dimension, lod);
         });
     }
@@ -126,12 +127,13 @@ public class ChunkLodDatabase implements AutoCloseable {
         }
     }
 
-    private void upsertChunkRow(Connection connection, int x, int z, String dimension, int lod, byte[] colors) throws SQLException {
+    private void upsertChunkRow(Connection connection, int x, int z, String dimension, int lod, byte[] colors, int minSurface) throws SQLException {
         String sql = """
-                INSERT INTO chunk_lod (x, z, dimension, lod, colors, empty, dirty)
-                VALUES (?, ?, ?, ?, ?, ?, 0)
+                INSERT INTO chunk_lod (x, z, dimension, lod, colors, min_surface, empty, dirty)
+                VALUES (?, ?, ?, ?, ?, ?, ?, 0)
                 ON CONFLICT(x, z, dimension, lod) DO UPDATE SET
                     colors = excluded.colors,
+                    min_surface = excluded.min_surface,
                     empty = excluded.empty
                 """;
 
@@ -140,12 +142,13 @@ public class ChunkLodDatabase implements AutoCloseable {
             pstmt.setInt(2, z);
             pstmt.setString(3, dimension);
             pstmt.setInt(4, lod);
+            pstmt.setInt(6, minSurface);
             if (colors == null) {
                 pstmt.setNull(5, Types.BLOB);
-                pstmt.setBoolean(6, true);
+                pstmt.setBoolean(7, true);
             } else {
                 pstmt.setBytes(5, CompressionUtil.compress(colors));
-                pstmt.setBoolean(6, false);
+                pstmt.setBoolean(7, false);
             }
             pstmt.executeUpdate();
         }
@@ -178,9 +181,10 @@ public class ChunkLodDatabase implements AutoCloseable {
      */
     public StoredChunk loadChunk(int x, int z, String dimension, int lod) throws SQLException {
         Connection connection = getConnection();
-        String sql = "SELECT colors, dirty FROM chunk_lod WHERE x = ? AND z = ? AND dimension = ? AND lod = ?";
+        String sql = "SELECT colors, dirty, min_surface FROM chunk_lod WHERE x = ? AND z = ? AND dimension = ? AND lod = ?";
         byte[] colors;
         boolean dirty;
+        int minSurface;
 
         try (PreparedStatement pstmt = connection.prepareStatement(sql)) {
             pstmt.setInt(1, x);
@@ -189,10 +193,11 @@ public class ChunkLodDatabase implements AutoCloseable {
             pstmt.setInt(4, lod);
 
             try (ResultSet rs = pstmt.executeQuery()) {
-                if (!rs.next()) return new StoredChunk(false, null, false);
+                if (!rs.next()) return new StoredChunk(false, null, false, 0);
                 byte[] compressed = rs.getBytes("colors");
                 colors = compressed == null ? null : CompressionUtil.decompress(compressed);
                 dirty = rs.getBoolean("dirty");
+                minSurface = rs.getInt("min_surface");
             }
         }
 
@@ -206,7 +211,7 @@ public class ChunkLodDatabase implements AutoCloseable {
                 dirty = pstmt.executeUpdate() == 1;
             }
         }
-        return new StoredChunk(true, colors, dirty);
+        return new StoredChunk(true, colors, dirty, minSurface);
     }
 
     public void markDirty(int x, int z, String dimension, int lod) throws SQLException {

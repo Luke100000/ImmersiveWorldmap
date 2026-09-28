@@ -72,7 +72,7 @@ public class ChunkLodProcessor {
 
         // Chunk is empty
         if (chunk.isEmpty()) {
-            upsertChunkData(chunkX, chunkZ, dimension, 0, null);
+            upsertChunkData(chunkX, chunkZ, dimension, 0, null, 0);
             return;
         }
 
@@ -86,7 +86,7 @@ public class ChunkLodProcessor {
             }
         }
         if (empty) {
-            upsertChunkData(chunkX, chunkZ, dimension, 0, null);
+            upsertChunkData(chunkX, chunkZ, dimension, 0, null, 0);
             return;
         }
 
@@ -113,12 +113,32 @@ public class ChunkLodProcessor {
             }
         }
 
-        upsertChunkData(chunkX, chunkZ, dimension, 0, chunkData);
+        upsertChunkData(chunkX, chunkZ, dimension, 0, chunkData, findMinSurface(chunkData));
     }
 
-    private static void upsertChunkData(int chunkX, int chunkZ, String dimension, int lod, byte[] data) {
+    // Lowest surface height in the chunk, 0 when no column has one
+    private static int findMinSurface(byte[] data) {
+        int height = data.length / 256;
+        int min = Integer.MAX_VALUE;
+        for (int x = 0; x < 16; x++) {
+            for (int z = 0; z < 16; z++) {
+                int top = 0;
+                for (int y = height - 1; y > 0; y--) {
+                    boolean skyAbove = y + 1 >= height || data[x * height * 16 + (y + 1) * 16 + z] == 0;
+                    if (skyAbove && data[x * height * 16 + y * 16 + z] != 0) {
+                        top = y;
+                        break;
+                    }
+                }
+                min = Math.min(min, top);
+            }
+        }
+        return min == Integer.MAX_VALUE ? 0 : min;
+    }
+
+    private static void upsertChunkData(int chunkX, int chunkZ, String dimension, int lod, byte[] data, int minSurface) {
         try {
-            DatabaseManager.getInstance().upsertChunk(chunkX, chunkZ, dimension, lod, data);
+            DatabaseManager.getInstance().upsertChunk(chunkX, chunkZ, dimension, lod, data, minSurface);
             clearLodCacheForLevel(chunkX, chunkZ, dimension, lod);
             clearParentLodCache(chunkX, chunkZ, dimension, lod);
             LodChunkMeshManager.INSTANCE.invalidate(chunkX, chunkZ, lod, dimension);
@@ -152,10 +172,10 @@ public class ChunkLodProcessor {
                     regenerateDirtyLodAsync(key);
                 }
                 return CompletableFuture.completedFuture(new LodChunkData(
-                        key.chunkX(), key.chunkZ(), key.dimension(), key.lod(), stored.colors()));
+                        key.chunkX(), key.chunkZ(), key.dimension(), key.lod(), stored.colors(), stored.minSurface()));
             }
             if (key.lod() == 0) {
-                return CompletableFuture.completedFuture(new LodChunkData(key.chunkX(), key.chunkZ(), key.dimension(), 0, null));
+                return CompletableFuture.completedFuture(new LodChunkData(key.chunkX(), key.chunkZ(), key.dimension(), 0, null, 0));
             }
             return generateLodAsync(key);
         });
@@ -192,12 +212,12 @@ public class ChunkLodProcessor {
     }
 
     private static ChunkLodDatabase.StoredChunk loadStoredChunk(CacheKey key) {
-        if (!DatabaseManager.isInitialized()) return new ChunkLodDatabase.StoredChunk(false, null, false);
+        if (!DatabaseManager.isInitialized()) return new ChunkLodDatabase.StoredChunk(false, null, false, 0);
         try {
             return DatabaseManager.getInstance().loadChunk(key.chunkX(), key.chunkZ(), key.dimension(), key.lod());
         } catch (SQLException e) {
             ImmersiveWorldmap.LOGGER.warn("Failed to retrieve chunk LOD data: {}", e.getMessage());
-            return new ChunkLodDatabase.StoredChunk(false, null, false);
+            return new ChunkLodDatabase.StoredChunk(false, null, false, 0);
         }
     }
 
@@ -216,14 +236,15 @@ public class ChunkLodProcessor {
         );
         return CompletableFuture.allOf(sources.toArray(CompletableFuture[]::new)).thenCompose(ignored -> {
             if (sources.stream().map(CompletableFuture::join).allMatch(LodChunkData::empty)) {
-                upsertChunkData(key.chunkX(), key.chunkZ(), key.dimension(), key.lod(), null);
-                return CompletableFuture.completedFuture(new LodChunkData(key.chunkX(), key.chunkZ(), key.dimension(), key.lod(), null));
+                upsertChunkData(key.chunkX(), key.chunkZ(), key.dimension(), key.lod(), null, 0);
+                return CompletableFuture.completedFuture(new LodChunkData(key.chunkX(), key.chunkZ(), key.dimension(), key.lod(), null, 0));
             }
             return EXECUTOR.submit(priority, key, () -> {
                 LodChunkData[][] data = {{sources.get(0).join(), sources.get(2).join()}, {sources.get(1).join(), sources.get(3).join()}};
                 byte[] result = generateLod(data);
-                upsertChunkData(key.chunkX(), key.chunkZ(), key.dimension(), key.lod(), result);
-                return new LodChunkData(key.chunkX(), key.chunkZ(), key.dimension(), key.lod(), result);
+                int minSurface = findMinSurface(result);
+                upsertChunkData(key.chunkX(), key.chunkZ(), key.dimension(), key.lod(), result, minSurface);
+                return new LodChunkData(key.chunkX(), key.chunkZ(), key.dimension(), key.lod(), result, minSurface);
             });
         });
     }
