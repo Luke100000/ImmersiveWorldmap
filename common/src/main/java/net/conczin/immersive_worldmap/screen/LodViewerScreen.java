@@ -3,9 +3,10 @@ package net.conczin.immersive_worldmap.screen;
 import com.mojang.blaze3d.systems.RenderSystem;
 import net.conczin.immersive_worldmap.database.DatabaseManager;
 import net.conczin.immersive_worldmap.lod.ChunkLodProcessor;
-import net.conczin.immersive_worldmap.renderer.LodChunkMeshManager;
-import net.conczin.immersive_worldmap.renderer.LodChunkVisibilitySelector;
 import net.conczin.immersive_worldmap.renderer.LodChunkMesh;
+import net.conczin.immersive_worldmap.renderer.LodChunkMeshManager;
+import net.conczin.immersive_worldmap.renderer.LodChunkPageManager;
+import net.conczin.immersive_worldmap.renderer.LodChunkVisibilitySelector;
 import net.conczin.immersive_worldmap.settings.SharedSettings;
 import net.minecraft.client.Minecraft;
 import net.minecraft.client.gui.GuiGraphics;
@@ -78,13 +79,13 @@ public class LodViewerScreen extends Screen {
             return;
         }
         ChunkLodProcessor.clearGeneratedLods(dimension);
-        LodChunkMeshManager.INSTANCE.clear();
         LodChunkVisibilitySelector.reset();
+        LodChunkMeshManager.INSTANCE.clear();
     }
 
     private void clearMeshes() {
-        LodChunkMeshManager.INSTANCE.clear();
         LodChunkVisibilitySelector.reset();
+        LodChunkMeshManager.INSTANCE.clear();
     }
 
     @Override
@@ -181,44 +182,25 @@ public class LodViewerScreen extends Screen {
 
         graphics.drawCenteredString(this.font, this.title, this.width / 2, 20, 0xFFFFFF);
         graphics.drawString(this.font, "Dimension: " + dimension, 20, 40, 0xFFFFFF);
-        graphics.drawString(this.font, "Tasks: " + ChunkLodProcessor.EXECUTOR.getProcessedTasks()
-                                       + " / " + ChunkLodProcessor.EXECUTOR.getTotalTasks(), 20, 52, 0xFFFFFF);
-        graphics.drawString(this.font, "Visible chunks: " + visible.size(), 20, 64, 0xFFFFFF);
-        graphics.drawString(this.font, "Caches: mesh " + LodChunkMeshManager.INSTANCE.getCacheSize()
-                                       + "  LOD " + ChunkLodProcessor.getCacheSize(), 20, 76, 0xFFFFFF);
-        graphics.drawString(this.font,
-                String.format("Zoom: %.1f  Yaw: %.1f  Pitch: %.1f",
-                        camera.getSmoothZoom(), camera.getSmoothYaw(), camera.getSmoothPitch()),
-                20, 88, 0xAAAAAA);
 
         int caveOffset = SharedSettings.caveViewBaselineY - caveBaselineY;
         graphics.drawString(this.font,
                 "Cave view: " + (SharedSettings.caveView ? "ON" : "OFF")
                 + "  slice Y=" + SharedSettings.caveViewBaselineY
                 + "  offset=" + (caveOffset >= 0 ? "+" : "") + caveOffset,
-                20, 100, SharedSettings.caveView ? 0xFFAA55 : 0xAAAAAA);
+                20, 52, SharedSettings.caveView ? 0xFFAA55 : 0xAAAAAA);
 
         graphics.drawString(this.font, "LMB: orbit   RMB: pan   Wheel: zoom   WASD: pan   Tab: cave view   Up/Down: slice",
                 20, this.height - 20, 0x888888);
-
-        if (visible.isEmpty()) {
-            graphics.drawCenteredString(this.font, "Loading...", this.width / 2, this.height / 2, 0xFFFF55);
-            return;
-        }
 
         RenderSystem.enableDepthTest();
         RenderSystem.disableBlend();
         RenderSystem.enableCull();
 
-        int faces = 0;
-        for (LodChunkMesh rs : visible) {
-            faces += rs.draw(mv, proj);
-        }
+        LodChunkPageManager.INSTANCE.draw(visible, mv, proj);
 
         RenderSystem.disableCull();
         RenderSystem.disableDepthTest();
-
-        graphics.drawString(this.font, String.format("Faces: %,d", faces), 20, 124, 0x55FFAA);
     }
 
     @Override

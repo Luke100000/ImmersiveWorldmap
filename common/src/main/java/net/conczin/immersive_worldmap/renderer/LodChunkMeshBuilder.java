@@ -14,6 +14,7 @@ import java.util.concurrent.CompletableFuture;
  * Renders LOD chunk data as a mesh.
  */
 public class LodChunkMeshBuilder {
+    private static final byte[] EMPTY = new byte[0];
     // How many blocks of wall are kept above the cave view baseline.
     private static final int CAVE_WALL_HEIGHT = 32;
 
@@ -31,14 +32,14 @@ public class LodChunkMeshBuilder {
      * @param chunkZ    chunk Z coordinate
      * @param dimension dimension identifier
      * @param lod       LOD level
-     * @return CompletableFuture that will contain the built mesh data, or null if no data exists
+     * @return CompletableFuture containing the built vertex data
      */
     @SuppressWarnings("DuplicatedCode")
-    public static CompletableFuture<MeshData> buildMeshAsync(int chunkX, int chunkZ, String dimension, int lod) {
+    public static CompletableFuture<byte[]> buildMeshAsync(int chunkX, int chunkZ, String dimension, int lod) {
         CompletableFuture<LodChunkData> center = ChunkLodProcessor.getLodChunkDataAsync(chunkX, chunkZ, dimension, lod);
         return center.thenCompose(centerData -> {
             if (centerData.empty()) {
-                return CompletableFuture.completedFuture(null);
+                return CompletableFuture.completedFuture(EMPTY);
             }
 
             CompletableFuture<LodChunkData> north = ChunkLodProcessor.getLodChunkDataAsync(chunkX, chunkZ - 1, dimension, lod);
@@ -57,9 +58,9 @@ public class LodChunkMeshBuilder {
     }
 
     @SuppressWarnings("DuplicatedCode")
-    private static MeshData buildMesh(ChunkNeighborhood neighbors, int lod) {
+    private static byte[] buildMesh(ChunkNeighborhood neighbors, int lod) {
         LodChunkData center = neighbors.center();
-        if (center.empty()) return null;
+        if (center.empty()) return EMPTY;
 
         // One LOD block covers 1 << lod world blocks, so the baseline has to be scaled down
         int baseline = Math.clamp(Math.floorDiv(SharedSettings.caveViewBaselineY, 1 << lod), 0, Math.max(0, center.getHeight() - 1));
@@ -71,6 +72,9 @@ public class LodChunkMeshBuilder {
         Tesselator tesselator = TesselatorPool.acquire();
         try {
             BufferBuilder builder = tesselator.begin(VertexFormat.Mode.QUADS, DefaultVertexFormat.POSITION_COLOR);
+            VertexWriter writer = new VertexWriter(builder,
+                    Math.floorMod(center.chunkX(), LodChunkPageManager.PAGE_SIZE) * 16,
+                    Math.floorMod(center.chunkZ(), LodChunkPageManager.PAGE_SIZE) * 16);
 
             int height = center.getHeight();
 
@@ -134,15 +138,15 @@ public class LodChunkMeshBuilder {
                             float ao11 = vertexAO(neighbors, x + 1, y + 1, z, x, y + 1, z + 1, x + 1, y + 1, z + 1);
                             float ao01 = vertexAO(neighbors, x - 1, y + 1, z, x, y + 1, z + 1, x - 1, y + 1, z + 1);
                             if (ao00 + ao11 > ao01 + ao10) {
-                                v(builder, x, y1, z, rTop, gTop, bTop, ao00);
-                                v(builder, x, y1, z1, rTop, gTop, bTop, ao01);
-                                v(builder, x1, y1, z1, rTop, gTop, bTop, ao11);
-                                v(builder, x1, y1, z, rTop, gTop, bTop, ao10);
+                                v(writer, x, y1, z, rTop, gTop, bTop, ao00);
+                                v(writer, x, y1, z1, rTop, gTop, bTop, ao01);
+                                v(writer, x1, y1, z1, rTop, gTop, bTop, ao11);
+                                v(writer, x1, y1, z, rTop, gTop, bTop, ao10);
                             } else {
-                                v(builder, x, y1, z1, rTop, gTop, bTop, ao01);
-                                v(builder, x1, y1, z1, rTop, gTop, bTop, ao11);
-                                v(builder, x1, y1, z, rTop, gTop, bTop, ao10);
-                                v(builder, x, y1, z, rTop, gTop, bTop, ao00);
+                                v(writer, x, y1, z1, rTop, gTop, bTop, ao01);
+                                v(writer, x1, y1, z1, rTop, gTop, bTop, ao11);
+                                v(writer, x1, y1, z, rTop, gTop, bTop, ao10);
+                                v(writer, x, y1, z, rTop, gTop, bTop, ao00);
                             }
                         }
 
@@ -154,15 +158,15 @@ public class LodChunkMeshBuilder {
                             float ao11 = vertexAO(neighbors, x + 1, y, z - 1, x, y + 1, z - 1, x + 1, y + 1, z - 1);
                             float ao01 = vertexAO(neighbors, x - 1, y, z - 1, x, y + 1, z - 1, x - 1, y + 1, z - 1);
                             if (ao00 + ao11 > ao01 + ao10) {
-                                v(builder, x, y, z, rSide, gSide, bSide, ao00);
-                                v(builder, x, y1, z, rSide, gSide, bSide, ao01);
-                                v(builder, x1, y1, z, rSide, gSide, bSide, ao11);
-                                v(builder, x1, y, z, rSide, gSide, bSide, ao10);
+                                v(writer, x, y, z, rSide, gSide, bSide, ao00);
+                                v(writer, x, y1, z, rSide, gSide, bSide, ao01);
+                                v(writer, x1, y1, z, rSide, gSide, bSide, ao11);
+                                v(writer, x1, y, z, rSide, gSide, bSide, ao10);
                             } else {
-                                v(builder, x, y1, z, rSide, gSide, bSide, ao01);
-                                v(builder, x1, y1, z, rSide, gSide, bSide, ao11);
-                                v(builder, x1, y, z, rSide, gSide, bSide, ao10);
-                                v(builder, x, y, z, rSide, gSide, bSide, ao00);
+                                v(writer, x, y1, z, rSide, gSide, bSide, ao01);
+                                v(writer, x1, y1, z, rSide, gSide, bSide, ao11);
+                                v(writer, x1, y, z, rSide, gSide, bSide, ao10);
+                                v(writer, x, y, z, rSide, gSide, bSide, ao00);
                             }
                         }
 
@@ -174,15 +178,15 @@ public class LodChunkMeshBuilder {
                             float ao11 = vertexAO(neighbors, x + 1, y, z + 1, x, y + 1, z + 1, x + 1, y + 1, z + 1);
                             float ao01 = vertexAO(neighbors, x - 1, y, z + 1, x, y + 1, z + 1, x - 1, y + 1, z + 1);
                             if (ao00 + ao11 > ao01 + ao10) {
-                                v(builder, x, y, z1, rSide, gSide, bSide, ao00);
-                                v(builder, x1, y, z1, rSide, gSide, bSide, ao10);
-                                v(builder, x1, y1, z1, rSide, gSide, bSide, ao11);
-                                v(builder, x, y1, z1, rSide, gSide, bSide, ao01);
+                                v(writer, x, y, z1, rSide, gSide, bSide, ao00);
+                                v(writer, x1, y, z1, rSide, gSide, bSide, ao10);
+                                v(writer, x1, y1, z1, rSide, gSide, bSide, ao11);
+                                v(writer, x, y1, z1, rSide, gSide, bSide, ao01);
                             } else {
-                                v(builder, x1, y, z1, rSide, gSide, bSide, ao10);
-                                v(builder, x1, y1, z1, rSide, gSide, bSide, ao11);
-                                v(builder, x, y1, z1, rSide, gSide, bSide, ao01);
-                                v(builder, x, y, z1, rSide, gSide, bSide, ao00);
+                                v(writer, x1, y, z1, rSide, gSide, bSide, ao10);
+                                v(writer, x1, y1, z1, rSide, gSide, bSide, ao11);
+                                v(writer, x, y1, z1, rSide, gSide, bSide, ao01);
+                                v(writer, x, y, z1, rSide, gSide, bSide, ao00);
                             }
                         }
 
@@ -194,15 +198,15 @@ public class LodChunkMeshBuilder {
                             float ao11 = vertexAO(neighbors, x - 1, y, z + 1, x - 1, y + 1, z, x - 1, y + 1, z + 1);
                             float ao01 = vertexAO(neighbors, x - 1, y, z - 1, x - 1, y + 1, z, x - 1, y + 1, z - 1);
                             if (ao00 + ao11 > ao01 + ao10) {
-                                v(builder, x, y, z, rSideEW, gSideEW, bSideEW, ao00);
-                                v(builder, x, y, z1, rSideEW, gSideEW, bSideEW, ao10);
-                                v(builder, x, y1, z1, rSideEW, gSideEW, bSideEW, ao11);
-                                v(builder, x, y1, z, rSideEW, gSideEW, bSideEW, ao01);
+                                v(writer, x, y, z, rSideEW, gSideEW, bSideEW, ao00);
+                                v(writer, x, y, z1, rSideEW, gSideEW, bSideEW, ao10);
+                                v(writer, x, y1, z1, rSideEW, gSideEW, bSideEW, ao11);
+                                v(writer, x, y1, z, rSideEW, gSideEW, bSideEW, ao01);
                             } else {
-                                v(builder, x, y1, z, rSideEW, gSideEW, bSideEW, ao01);
-                                v(builder, x, y, z, rSideEW, gSideEW, bSideEW, ao00);
-                                v(builder, x, y, z1, rSideEW, gSideEW, bSideEW, ao10);
-                                v(builder, x, y1, z1, rSideEW, gSideEW, bSideEW, ao11);
+                                v(writer, x, y1, z, rSideEW, gSideEW, bSideEW, ao01);
+                                v(writer, x, y, z, rSideEW, gSideEW, bSideEW, ao00);
+                                v(writer, x, y, z1, rSideEW, gSideEW, bSideEW, ao10);
+                                v(writer, x, y1, z1, rSideEW, gSideEW, bSideEW, ao11);
                             }
                         }
 
@@ -214,22 +218,27 @@ public class LodChunkMeshBuilder {
                             float ao11 = vertexAO(neighbors, x + 1, y, z + 1, x + 1, y + 1, z, x + 1, y + 1, z + 1);
                             float ao01 = vertexAO(neighbors, x + 1, y, z - 1, x + 1, y + 1, z, x + 1, y + 1, z - 1);
                             if (ao00 + ao11 > ao01 + ao10) {
-                                v(builder, x1, y, z, rSideEW, gSideEW, bSideEW, ao00);
-                                v(builder, x1, y1, z, rSideEW, gSideEW, bSideEW, ao01);
-                                v(builder, x1, y1, z1, rSideEW, gSideEW, bSideEW, ao11);
-                                v(builder, x1, y, z1, rSideEW, gSideEW, bSideEW, ao10);
+                                v(writer, x1, y, z, rSideEW, gSideEW, bSideEW, ao00);
+                                v(writer, x1, y1, z, rSideEW, gSideEW, bSideEW, ao01);
+                                v(writer, x1, y1, z1, rSideEW, gSideEW, bSideEW, ao11);
+                                v(writer, x1, y, z1, rSideEW, gSideEW, bSideEW, ao10);
                             } else {
-                                v(builder, x1, y1, z, rSideEW, gSideEW, bSideEW, ao01);
-                                v(builder, x1, y1, z1, rSideEW, gSideEW, bSideEW, ao11);
-                                v(builder, x1, y, z1, rSideEW, gSideEW, bSideEW, ao10);
-                                v(builder, x1, y, z, rSideEW, gSideEW, bSideEW, ao00);
+                                v(writer, x1, y1, z, rSideEW, gSideEW, bSideEW, ao01);
+                                v(writer, x1, y1, z1, rSideEW, gSideEW, bSideEW, ao11);
+                                v(writer, x1, y, z1, rSideEW, gSideEW, bSideEW, ao10);
+                                v(writer, x1, y, z, rSideEW, gSideEW, bSideEW, ao00);
                             }
                         }
                     }
                 }
             }
 
-            return hasFaces ? builder.buildOrThrow() : null;
+            if (!hasFaces) return EMPTY;
+            try (MeshData mesh = builder.buildOrThrow()) {
+                byte[] vertices = new byte[mesh.vertexBuffer().remaining()];
+                mesh.vertexBuffer().get(vertices);
+                return vertices;
+            }
         } finally {
             TesselatorPool.release(tesselator);
         }
@@ -249,8 +258,12 @@ public class LodChunkMeshBuilder {
         return chunk == null || chunk.empty() ? 0 : chunk.minSurface();
     }
 
-    private static void v(BufferBuilder b, float x, float y, float z, float r, float g, float col, float ao) {
-        b.addVertex(x, y, z).setColor((int) (r * ao), (int) (g * ao), (int) (col * ao), 255);
+    private record VertexWriter(BufferBuilder builder, int xOffset, int zOffset) {
+    }
+
+    private static void v(VertexWriter writer, float x, float y, float z, float r, float g, float col, float ao) {
+        writer.builder().addVertex(x + writer.xOffset(), y, z + writer.zOffset())
+                .setColor((int) (r * ao), (int) (g * ao), (int) (col * ao), 255);
     }
 
     private static float vertexAO(

@@ -26,13 +26,14 @@ public class ImmersiveWorldmap {
     }
 
     public static void shutdown() {
+        LodChunkVisibilitySelector.reset();
         ChunkLodProcessor.shutdown();
         DatabaseManager.shutdown();
-        LodChunkVisibilitySelector.reset();
         LodChunkMeshManager.INSTANCE.clear();
     }
 
     public static void start() {
+        LodChunkVisibilitySelector.reset();
         if (DatabaseManager.isInitialized()) {
             ChunkLodProcessor.shutdown();
             DatabaseManager.shutdown();

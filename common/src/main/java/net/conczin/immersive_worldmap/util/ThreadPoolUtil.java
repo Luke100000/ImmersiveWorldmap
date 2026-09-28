@@ -8,7 +8,10 @@ public final class ThreadPoolUtil {
 
     public static PriorityThreadPoolExecutor createLowPriorityFixedThreadPool(String namePrefix) {
         int cores = Runtime.getRuntime().availableProcessors();
-        int threads = Math.max(1, cores - 2);
+        return createLowPriorityFixedThreadPool(namePrefix, Math.max(1, cores - 2));
+    }
+
+    public static PriorityThreadPoolExecutor createLowPriorityFixedThreadPool(String namePrefix, int threads) {
         ThreadFactory threadFactory = r -> {
             Thread thread = new Thread(r);
             thread.setName(namePrefix + "-" + thread.threadId());

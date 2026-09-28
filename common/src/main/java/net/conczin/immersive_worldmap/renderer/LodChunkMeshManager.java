@@ -23,6 +23,7 @@ public final class LodChunkMeshManager {
     }
 
     public void clear() {
+        LodChunkPageManager.INSTANCE.clear();
         for (LodChunkMesh mesh : cache.clear()) {
             mesh.close();
         }
@@ -30,8 +31,12 @@ public final class LodChunkMeshManager {
 
     public void invalidate(int cx, int cz, int lod, String dimension) {
         for (int parentLod = lod; parentLod <= LodChunkData.MAX_LOD; parentLod++) {
-            LodChunkMesh mesh = cache.get(new ChunkLodProcessor.CacheKey(cx, cz, dimension, parentLod));
-            if (mesh != null) mesh.markDirty();
+            for (int dx = -1; dx <= 1; dx++) {
+                for (int dz = -1; dz <= 1; dz++) {
+                    LodChunkMesh mesh = cache.get(new ChunkLodProcessor.CacheKey(cx + dx, cz + dz, dimension, parentLod));
+                    if (mesh != null) mesh.markDirty();
+                }
+            }
             cx = Math.floorDiv(cx, 2);
             cz = Math.floorDiv(cz, 2);
         }
