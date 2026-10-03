@@ -171,8 +171,14 @@ public class LodViewerScreen extends Screen {
         RenderSystem.disableCull();
         RenderSystem.disableDepthTest();
 
-        graphics.drawString(this.font, "LMB: orbit   RMB: pan   Wheel: zoom   WASD: pan   Tab: cave view   Up/Down: slice",
-                20, this.height - 20, 0x888888);
+        String controls = "LMB: orbit   RMB: pan   Wheel: zoom   WASD/Arrows: pan   Tab: cave view";
+        int padding = 4;
+        int controlsX = 20;
+        int controlsY = this.height - 20;
+        graphics.fill(controlsX - padding, controlsY - padding,
+                controlsX + this.font.width(controls) + padding, controlsY + this.font.lineHeight + padding,
+                0x80000000);
+        graphics.drawString(this.font, controls, controlsX, controlsY, 0xFFFFFFFF);
     }
 
     @Override
