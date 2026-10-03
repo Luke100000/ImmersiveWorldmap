@@ -10,10 +10,16 @@ import net.conczin.immersive_worldmap.renderer.LodChunkVisibilitySelector;
 import net.conczin.immersive_worldmap.settings.SharedSettings;
 import net.minecraft.client.Minecraft;
 import net.minecraft.client.gui.GuiGraphics;
+import net.minecraft.client.gui.components.PlayerFaceRenderer;
 import net.minecraft.client.gui.screens.Screen;
+import net.minecraft.client.player.AbstractClientPlayer;
+import net.minecraft.client.renderer.entity.LivingEntityRenderer;
 import net.minecraft.network.chat.Component;
+import net.minecraft.world.entity.player.PlayerModelPart;
 import net.minecraft.world.level.LightLayer;
+import net.minecraft.world.phys.Vec3;
 import org.joml.Matrix4f;
+import org.joml.Vector4f;
 import org.lwjgl.opengl.GL11;
 
 import java.util.HashSet;
@@ -23,6 +29,7 @@ import java.util.Set;
 public class LodViewerScreen extends Screen {
     private static final int KEY_ESCAPE = 256;
     private static final int KEY_TAB = 258;
+    private static final int PLAYER_MARKER_SIZE = 16;
 
     private final Minecraft minecraft;
     private String dimension;
@@ -173,6 +180,8 @@ public class LodViewerScreen extends Screen {
         RenderSystem.disableDepthTest();
         RenderSystem.clear(GL11.GL_DEPTH_BUFFER_BIT, Minecraft.ON_OSX);
 
+        renderPlayers(graphics, mv, proj, partialTick);
+
         String closeKey = ImmersiveWorldmap.MAP_VIEWER_KEY.getTranslatedKeyMessage().getString();
         String controls = "LMB: orbit   RMB: pan   Wheel: zoom   WASD/Arrows: pan   Tab: cave view   " + closeKey + ": close";
         int padding = 4;
@@ -182,6 +191,32 @@ public class LodViewerScreen extends Screen {
                 controlsX + this.font.width(controls) + padding, controlsY + this.font.lineHeight + padding,
                 0x80000000);
         graphics.drawString(this.font, controls, controlsX, controlsY, 0xFFFFFFFF);
+    }
+
+    private void renderPlayers(GuiGraphics graphics, Matrix4f mv, Matrix4f proj, float partialTick) {
+        if (minecraft.level == null || !minecraft.level.dimension().location().toString().equals(dimension)) return;
+
+        Matrix4f viewProjection = new Matrix4f(proj).mul(mv);
+        Vector4f position = new Vector4f();
+        for (AbstractClientPlayer player : minecraft.level.players()) {
+            Vec3 worldPosition = player.getPosition(partialTick);
+            position.set((float) worldPosition.x,
+                    (float) (worldPosition.y - minecraft.level.getMinBuildHeight()),
+                    (float) worldPosition.z, 1f);
+            viewProjection.transform(position);
+
+            // Clip before dividing so players behind the camera cannot appear on the map.
+            if (position.w <= 0f || Math.abs(position.x) > position.w
+                    || Math.abs(position.y) > position.w || Math.abs(position.z) > position.w) continue;
+
+            int x = Math.round((position.x / position.w + 1f) * width * 0.5f) - PLAYER_MARKER_SIZE / 2;
+            int y = Math.round((1f - position.y / position.w) * height * 0.5f) - PLAYER_MARKER_SIZE / 2;
+            graphics.fill(x - 1, y - 1, x + PLAYER_MARKER_SIZE + 1, y + PLAYER_MARKER_SIZE + 1, 0xFF000000);
+            graphics.flush();
+            RenderSystem.disableDepthTest();
+            PlayerFaceRenderer.draw(graphics, player.getSkin().texture(), x, y, PLAYER_MARKER_SIZE,
+                    player.isModelPartShown(PlayerModelPart.HAT), LivingEntityRenderer.isEntityUpsideDown(player));
+        }
     }
 
     @Override
