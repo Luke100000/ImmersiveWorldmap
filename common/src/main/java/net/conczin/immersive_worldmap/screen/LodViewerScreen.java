@@ -161,7 +161,9 @@ public class LodViewerScreen extends Screen {
         RenderSystem.disableBlend();
         RenderSystem.enableCull();
 
-        LodChunkPageManager.INSTANCE.draw(visible, mv, proj);
+        LodChunkPageManager.INSTANCE.draw(visible, mv, proj,
+                camera.getSmoothTargetX(), camera.getSmoothTargetZ(),
+                LodChunkVisibilitySelector.renderRadius(camera.getSmoothZoom()));
 
         RenderSystem.disableCull();
         RenderSystem.disableDepthTest();

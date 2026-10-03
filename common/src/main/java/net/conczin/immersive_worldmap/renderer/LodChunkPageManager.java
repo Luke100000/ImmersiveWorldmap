@@ -7,10 +7,10 @@ import com.mojang.blaze3d.vertex.MeshData;
 import com.mojang.blaze3d.vertex.VertexBuffer;
 import com.mojang.blaze3d.vertex.VertexFormat;
 import net.conczin.immersive_worldmap.ImmersiveWorldmap;
+import net.conczin.immersive_worldmap.screen.MapBackgroundTexture;
 import net.conczin.immersive_worldmap.util.PriorityThreadPoolExecutor;
 import net.conczin.immersive_worldmap.util.ThreadPoolUtil;
 import net.minecraft.client.Minecraft;
-import net.minecraft.client.renderer.GameRenderer;
 import net.minecraft.client.renderer.ShaderInstance;
 import org.joml.Matrix4f;
 import org.lwjgl.BufferUtils;
@@ -33,6 +33,7 @@ import java.util.concurrent.ConcurrentLinkedQueue;
 
 public final class LodChunkPageManager {
     public static final int PAGE_SIZE = 16;
+    public static final String SHADER_NAME = "immersive_worldmap_map";
 
     private static final int SLOTS = PAGE_SIZE * PAGE_SIZE;
     private static final int VERTEX_SIZE = DefaultVertexFormat.POSITION_COLOR.getVertexSize();
@@ -72,7 +73,7 @@ public final class LodChunkPageManager {
         }
     }
 
-    public void draw(List<LodChunkMesh> visible, Matrix4f mv, Matrix4f proj) {
+    public void draw(List<LodChunkMesh> visible, Matrix4f mv, Matrix4f proj, float focusX, float focusZ, float radius) {
         frame++;
         uploadReady();
 
@@ -85,12 +86,22 @@ public final class LodChunkPageManager {
             }
         }
 
-        ShaderInstance shader = GameRenderer.getPositionColorShader();
+        Minecraft minecraft = Minecraft.getInstance();
+        ShaderInstance shader = minecraft.gameRenderer.getShader(SHADER_NAME);
         if (shader != null) {
+            int width = minecraft.getWindow().getGuiScaledWidth();
+            int height = minecraft.getWindow().getGuiScaledHeight();
+            int side = (int) Math.ceil(Math.hypot(width, height));
+            shader.setSampler("BackgroundTexture", minecraft.getTextureManager().getTexture(MapBackgroundTexture.get()));
+            shader.safeGetUniform("BackgroundUv").set(
+                    (float) width / side, (float) height / side,
+                    -(float) ((width - side) / 2) / side, -(float) ((height - side) / 2) / side);
+            shader.safeGetUniform("FadeStart").set(radius * 0.75f);
+            shader.safeGetUniform("FadeEnd").set(radius);
             for (Map.Entry<Page, List<LodChunkMesh>> entry : batches.entrySet()) {
                 Page page = entry.getKey();
                 page.lastDrawFrame = frame;
-                page.draw(entry.getValue(), mv, proj, shader);
+                page.draw(entry.getValue(), mv, proj, shader, focusX, focusZ);
             }
         }
         trim();
@@ -329,7 +340,7 @@ public final class LodChunkPageManager {
             }
         }
 
-        void draw(List<LodChunkMesh> selected, Matrix4f mv, Matrix4f proj, ShaderInstance shader) {
+        void draw(List<LodChunkMesh> selected, Matrix4f mv, Matrix4f proj, ShaderInstance shader, float focusX, float focusZ) {
             if (vertexBuffer == null) return;
             counts.clear();
             bases.clear();
@@ -350,6 +361,9 @@ public final class LodChunkPageManager {
             offsets.flip();
 
             float scale = 1 << key.lod;
+            shader.safeGetUniform("MapOffset").set(
+                    key.x * PAGE_SIZE * 16f * scale - focusX, key.z * PAGE_SIZE * 16f * scale - focusZ);
+            shader.safeGetUniform("MapScale").set(scale);
             localMv.set(mv)
                     .translate(key.x * PAGE_SIZE * 16f * scale, 0, key.z * PAGE_SIZE * 16f * scale)
                     .scale(scale, scale, scale);

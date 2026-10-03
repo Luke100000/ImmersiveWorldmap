@@ -95,7 +95,7 @@ public class LodChunkVisibilitySelector {
 
         FrustumIntersection frustum = new FrustumIntersection(snapshot.viewProjection());
         int targetLod = selectLod(snapshot);
-        double radius = Math.ceil(snapshot.zoom() / CHUNK_SIZE * RENDER_DISTANCE);
+        double radius = renderRadius(snapshot.zoom());
         float rootWorldSize = worldSize(LodChunkData.MAX_LOD);
         int centerX = (int) Math.floor(snapshot.focusX() / rootWorldSize);
         int centerZ = (int) Math.floor(snapshot.focusZ() / rootWorldSize);
@@ -215,6 +215,10 @@ public class LodChunkVisibilitySelector {
 
     private void addTaskInterest(Set<ChunkLodProcessor.CacheKey> keys, int chunkX, int chunkZ, int lod, String dimension) {
         keys.add(new ChunkLodProcessor.CacheKey(chunkX, chunkZ, dimension, lod));
+    }
+
+    public static float renderRadius(float zoom) {
+        return (float) Math.ceil(zoom / CHUNK_SIZE * RENDER_DISTANCE);
     }
 
     public void update(Matrix4f mv, Matrix4f proj, String dimension, float focusX, float focusZ, float zoom) {

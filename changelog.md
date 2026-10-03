@@ -1,8 +1,6 @@
 # TODO
 
-* Deduplicate incoming chunks (hash? Time?)
 * Markers
-* Fade out
 
 # V1
 
