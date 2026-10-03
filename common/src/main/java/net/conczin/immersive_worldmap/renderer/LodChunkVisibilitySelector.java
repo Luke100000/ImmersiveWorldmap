@@ -28,7 +28,7 @@ public class LodChunkVisibilitySelector {
     private static final float CHUNK_HEIGHT = 384f;
     private static final int CHUNK_SIZE = 16;
 
-    private static final double SUBDIVIDE_DISTANCE_FACTOR = 6;
+    private static final double SUBDIVIDE_DISTANCE_FACTOR = 12;
     private static final double RENDER_DISTANCE = 48;
     private static final double LOG_2 = Math.log(2.0);
 

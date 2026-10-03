@@ -2,11 +2,11 @@
 
 * Deduplicate incoming chunks (hash? Time?)
 * Screen transition
-* Make sure the screen does not render background
-* Finalize screen
 * Markers
 * Fade out
 * Debug view
+* Give controls a bit of black background
+* WASD not rotated
 
 # V1
 

@@ -40,7 +40,7 @@ public class LodViewerScreen extends Screen {
         int previousBaselineY = SharedSettings.caveViewBaselineY;
         loadState();
         if (previousCaveView != SharedSettings.caveView
-                || (SharedSettings.caveView && previousBaselineY != SharedSettings.caveViewBaselineY)) {
+            || (SharedSettings.caveView && previousBaselineY != SharedSettings.caveViewBaselineY)) {
             clearMeshes();
         }
     }
@@ -124,12 +124,20 @@ public class LodViewerScreen extends Screen {
 
     @Override
     public void renderBackground(GuiGraphics g, int mouseX, int mouseY, float partialTick) {
-        // TODO: Gradient
+        int side = (int) Math.ceil(Math.hypot(width, height));
+        RenderSystem.depthMask(false);
+        try {
+            g.blit(MapBackgroundTexture.get(), (width - side) / 2, (height - side) / 2,
+                    side, side, 0f, 0f, MapBackgroundTexture.SIZE, MapBackgroundTexture.SIZE, MapBackgroundTexture.SIZE, MapBackgroundTexture.SIZE);
+        } finally {
+            RenderSystem.depthMask(true);
+        }
     }
 
     @Override
     public void render(GuiGraphics graphics, int mouseX, int mouseY, float partialTick) {
         super.render(graphics, mouseX, mouseY, partialTick);
+
         camera.tick();
         LodChunkMeshManager.tick();
 
@@ -154,9 +162,6 @@ public class LodViewerScreen extends Screen {
 
         List<LodChunkMesh> visible = LodChunkVisibilitySelector.get().visibleChunks();
 
-        graphics.drawString(this.font, "LMB: orbit   RMB: pan   Wheel: zoom   WASD: pan   Tab: cave view   Up/Down: slice",
-                20, this.height - 20, 0x888888);
-
         RenderSystem.enableDepthTest();
         RenderSystem.disableBlend();
         RenderSystem.enableCull();
@@ -165,6 +170,9 @@ public class LodViewerScreen extends Screen {
 
         RenderSystem.disableCull();
         RenderSystem.disableDepthTest();
+
+        graphics.drawString(this.font, "LMB: orbit   RMB: pan   Wheel: zoom   WASD: pan   Tab: cave view   Up/Down: slice",
+                20, this.height - 20, 0x888888);
     }
 
     @Override

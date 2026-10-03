@@ -6,7 +6,7 @@
   "compatibilityLevel": "JAVA_21",
   "mixins": [
   ],
-  "client": ["ClientChunkCacheMixin"],
+  "client": ["ClientChunkCacheMixin", "GameRendererMixin"],
   "server": [
   ],
   "injectors": {
