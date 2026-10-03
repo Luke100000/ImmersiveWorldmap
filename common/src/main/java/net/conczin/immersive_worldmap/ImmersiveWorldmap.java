@@ -4,9 +4,11 @@ import net.conczin.immersive_worldmap.database.DatabaseManager;
 import net.conczin.immersive_worldmap.lod.ChunkLodProcessor;
 import net.conczin.immersive_worldmap.renderer.LodChunkMeshManager;
 import net.conczin.immersive_worldmap.renderer.LodChunkVisibilitySelector;
+import net.minecraft.client.KeyMapping;
 import net.minecraft.client.Minecraft;
 import net.minecraft.client.multiplayer.ServerData;
 import net.minecraft.client.server.IntegratedServer;
+import org.lwjgl.glfw.GLFW;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -16,6 +18,11 @@ public class ImmersiveWorldmap {
     public static final String MOD_ID = "immersive_worldmap";
     public static final String MOD_NAME = "Immersive Worldmap";
     public static final Logger LOGGER = LoggerFactory.getLogger(MOD_NAME);
+
+    public static final KeyMapping MAP_VIEWER_KEY = new KeyMapping(
+            "key.immersive_worldmap.open_lod_viewer",
+            GLFW.GLFW_KEY_M,
+            "category.immersive_worldmap");
 
     public static void init() {
         // No-op

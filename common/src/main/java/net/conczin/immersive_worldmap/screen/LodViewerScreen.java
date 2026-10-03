@@ -1,6 +1,7 @@
 package net.conczin.immersive_worldmap.screen;
 
 import com.mojang.blaze3d.systems.RenderSystem;
+import net.conczin.immersive_worldmap.ImmersiveWorldmap;
 import net.conczin.immersive_worldmap.lod.ChunkLodProcessor;
 import net.conczin.immersive_worldmap.renderer.LodChunkMesh;
 import net.conczin.immersive_worldmap.renderer.LodChunkMeshManager;
@@ -85,6 +86,11 @@ public class LodViewerScreen extends Screen {
 
     @Override
     public boolean keyPressed(int keyCode, int scanCode, int modifiers) {
+        if (ImmersiveWorldmap.MAP_VIEWER_KEY.matches(keyCode, scanCode)) {
+            onClose();
+            return true;
+        }
+
         if (keyCode == KEY_TAB) {
             if (heldKeys.add(keyCode)) {
                 SharedSettings.caveView = !SharedSettings.caveView;
@@ -160,7 +166,8 @@ public class LodViewerScreen extends Screen {
         RenderSystem.disableCull();
         RenderSystem.disableDepthTest();
 
-        String controls = "LMB: orbit   RMB: pan   Wheel: zoom   WASD/Arrows: pan   Tab: cave view";
+        String closeKey = ImmersiveWorldmap.MAP_VIEWER_KEY.getTranslatedKeyMessage().getString();
+        String controls = "LMB: orbit   RMB: pan   Wheel: zoom   WASD/Arrows: pan   Tab: cave view   " + closeKey + ": close";
         int padding = 4;
         int controlsX = 20;
         int controlsY = this.height - 20;

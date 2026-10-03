@@ -21,7 +21,7 @@ public class ImmersiveWorldmapNeoForge {
         ImmersiveWorldmap.onClientTick();
 
         Minecraft client = Minecraft.getInstance();
-        while (KeyBindingsNeoForge.MAP_VIEWER.consumeClick()) {
+        while (ImmersiveWorldmap.MAP_VIEWER_KEY.consumeClick()) {
             if (client.screen == null) {
                 client.setScreen(new LodViewerScreen());
             }
