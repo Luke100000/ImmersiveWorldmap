@@ -21,9 +21,6 @@ import java.util.Set;
 public class LodViewerScreen extends Screen {
     private static final int KEY_ESCAPE = 256;
     private static final int KEY_TAB = 258;
-    private static final int KEY_DOWN = 264;
-    private static final int KEY_UP = 265;
-    private static final int CAVE_OFFSET_STEP = 16;
 
     private final Minecraft minecraft;
     private String dimension;
@@ -88,13 +85,9 @@ public class LodViewerScreen extends Screen {
 
     @Override
     public boolean keyPressed(int keyCode, int scanCode, int modifiers) {
-        if (isCaveKey(keyCode)) {
+        if (keyCode == KEY_TAB) {
             if (heldKeys.add(keyCode)) {
-                switch (keyCode) {
-                    case KEY_TAB -> SharedSettings.caveView = !SharedSettings.caveView;
-                    case KEY_UP -> SharedSettings.caveViewBaselineY += CAVE_OFFSET_STEP;
-                    case KEY_DOWN -> SharedSettings.caveViewBaselineY -= CAVE_OFFSET_STEP;
-                }
+                SharedSettings.caveView = !SharedSettings.caveView;
                 clearMeshes();
             }
             return true;
@@ -116,10 +109,6 @@ public class LodViewerScreen extends Screen {
         }
 
         return super.keyReleased(keyCode, scanCode, modifiers);
-    }
-
-    private static boolean isCaveKey(int keyCode) {
-        return keyCode == KEY_TAB || keyCode == KEY_UP || keyCode == KEY_DOWN;
     }
 
     @Override

@@ -1,12 +1,8 @@
 # TODO
 
 * Deduplicate incoming chunks (hash? Time?)
-* Screen transition
 * Markers
 * Fade out
-* Debug view
-* Give controls a bit of black background
-* WASD not rotated
 
 # V1
 

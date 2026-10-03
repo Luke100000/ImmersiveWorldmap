@@ -28,6 +28,15 @@ public class Camera3D {
     private static final float ROT_SENSITIVITY = 0.4f;   // px -> degrees
     private static final float WASD_SPEED = 0.015f; // fraction of zoom per tick
 
+    private static final int KEY_W = 87;
+    private static final int KEY_A = 65;
+    private static final int KEY_S = 83;
+    private static final int KEY_D = 68;
+    private static final int KEY_RIGHT = 262;
+    private static final int KEY_LEFT = 263;
+    private static final int KEY_DOWN = 264;
+    private static final int KEY_UP = 265;
+
     private boolean keyW, keyA, keyS, keyD;
     private long lastTickNanos = 0;
 
@@ -49,15 +58,14 @@ public class Camera3D {
         float decay = (dt == 0f) ? 0f : (float) Math.pow(0.5, dt / DECAY_HALF_LIFE);
         float lerp = (dt == 0f) ? 0f : 1f - (float) Math.pow(0.5, dt / SMOOTH_HALF_LIFE);
 
-        // WASD pan aligned to yaw. Convention: yaw=0 -> fwd = -Z, right = +X.
+        // WASD pan relative to camera yaw. Matches the view basis:
+        // screen-forward = (sin yaw, cos yaw), screen-right = f x up = (-cos yaw, sin yaw).
         if (keyW || keyA || keyS || keyD) {
             float yr = (float) Math.toRadians(smoothYaw);
-            // forward vector in XZ (toward screen top)
-            float fwdX = -(float) Math.sin(yr);
+            float fwdX = (float) Math.sin(yr);
             float fwdZ = (float) Math.cos(yr);
-            // right vector = rotate fwd 90 CW: rigX = fwdZ, rigZ = -fwdX
-            float rigX = fwdZ;
-            float rigZ = -fwdX;
+            float rigX = -(float) Math.cos(yr);
+            float rigZ = (float) Math.sin(yr);
             float speed = WASD_SPEED * smoothZoom;
 
             if (keyW) {
@@ -163,19 +171,19 @@ public class Camera3D {
 
     public boolean keyPressed(int keyCode) {
         switch (keyCode) {
-            case 87 -> {
+            case KEY_W, KEY_UP -> {
                 keyW = true;
                 return true;
             }
-            case 83 -> {
+            case KEY_S, KEY_DOWN -> {
                 keyS = true;
                 return true;
             }
-            case 65 -> {
+            case KEY_A, KEY_LEFT -> {
                 keyA = true;
                 return true;
             }
-            case 68 -> {
+            case KEY_D, KEY_RIGHT -> {
                 keyD = true;
                 return true;
             }
@@ -185,19 +193,19 @@ public class Camera3D {
 
     public boolean keyReleased(int keyCode) {
         switch (keyCode) {
-            case 87 -> {
+            case KEY_W, KEY_UP -> {
                 keyW = false;
                 return true;
             }
-            case 83 -> {
+            case KEY_S, KEY_DOWN -> {
                 keyS = false;
                 return true;
             }
-            case 65 -> {
+            case KEY_A, KEY_LEFT -> {
                 keyA = false;
                 return true;
             }
-            case 68 -> {
+            case KEY_D, KEY_RIGHT -> {
                 keyD = false;
                 return true;
             }
