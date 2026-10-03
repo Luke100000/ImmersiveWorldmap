@@ -37,22 +37,9 @@ public class ChunkLodProcessor {
         EXECUTOR.close();
     }
 
-    public static void clearGeneratedLods(String dimension) {
-        if (!DatabaseManager.isInitialized()) {
-            return;
-        }
-
-        try {
-            DatabaseManager.getInstance().clearGeneratedLods(dimension);
-            LOD_CACHE.removeIf(key -> key.dimension().equals(dimension) && key.lod() > 0);
-        } catch (SQLException e) {
-            ImmersiveWorldmap.LOGGER.warn("Failed to delete generated LOD data: {}", e.getMessage());
-        }
-    }
-
-    public static void processChunk(LevelChunk chunk) {
+    public static void processChunk(LevelChunk chunk, long packetHash) {
         EXECUTOR.submit(0, () -> {
-            processChunkSync(chunk);
+            processChunkSync(chunk, packetHash);
             return null;
         });
     }
@@ -61,7 +48,7 @@ public class ChunkLodProcessor {
         return (x * height * 16) + (y * 16) + z;
     }
 
-    private static void processChunkSync(LevelChunk chunk) {
+    private static void processChunkSync(LevelChunk chunk, long packetHash) {
         if (!DatabaseManager.isInitialized()) {
             return;
         }
@@ -70,9 +57,19 @@ public class ChunkLodProcessor {
         int chunkZ = chunk.getPos().z;
         String dimension = chunk.getLevel().dimension().location().toString();
 
+        // Skip chunks whose packet bytes are identical to the last ingest
+        try {
+            Long storedHash = DatabaseManager.getInstance().getPacketHash(chunkX, chunkZ, dimension, 0);
+            if (storedHash != null && storedHash == packetHash) {
+                return;
+            }
+        } catch (SQLException e) {
+            ImmersiveWorldmap.LOGGER.warn("Failed to read chunk packet hash: {}", e.getMessage());
+        }
+
         // Chunk is empty
         if (chunk.isEmpty()) {
-            upsertChunkData(chunkX, chunkZ, dimension, 0, null, 0);
+            upsertChunkData(chunkX, chunkZ, dimension, 0, null, 0, packetHash);
             return;
         }
 
@@ -86,7 +83,7 @@ public class ChunkLodProcessor {
             }
         }
         if (empty) {
-            upsertChunkData(chunkX, chunkZ, dimension, 0, null, 0);
+            upsertChunkData(chunkX, chunkZ, dimension, 0, null, 0, packetHash);
             return;
         }
 
@@ -113,7 +110,7 @@ public class ChunkLodProcessor {
             }
         }
 
-        upsertChunkData(chunkX, chunkZ, dimension, 0, chunkData, findMinSurface(chunkData));
+        upsertChunkData(chunkX, chunkZ, dimension, 0, chunkData, findMinSurface(chunkData), packetHash);
     }
 
     // Lowest surface height in the chunk, 0 when no column has one
@@ -136,9 +133,9 @@ public class ChunkLodProcessor {
         return min == Integer.MAX_VALUE ? 0 : min;
     }
 
-    private static void upsertChunkData(int chunkX, int chunkZ, String dimension, int lod, byte[] data, int minSurface) {
+    private static void upsertChunkData(int chunkX, int chunkZ, String dimension, int lod, byte[] data, int minSurface, long packetHash) {
         try {
-            DatabaseManager.getInstance().upsertChunk(chunkX, chunkZ, dimension, lod, data, minSurface);
+            DatabaseManager.getInstance().upsertChunk(chunkX, chunkZ, dimension, lod, data, minSurface, packetHash);
             clearLodCacheForLevel(chunkX, chunkZ, dimension, lod);
             clearParentLodCache(chunkX, chunkZ, dimension, lod);
             LodChunkMeshManager.INSTANCE.invalidate(chunkX, chunkZ, lod, dimension);
@@ -236,14 +233,14 @@ public class ChunkLodProcessor {
         );
         return CompletableFuture.allOf(sources.toArray(CompletableFuture[]::new)).thenCompose(ignored -> {
             if (sources.stream().map(CompletableFuture::join).allMatch(LodChunkData::empty)) {
-                upsertChunkData(key.chunkX(), key.chunkZ(), key.dimension(), key.lod(), null, 0);
+                upsertChunkData(key.chunkX(), key.chunkZ(), key.dimension(), key.lod(), null, 0, 0L);
                 return CompletableFuture.completedFuture(new LodChunkData(key.chunkX(), key.chunkZ(), key.dimension(), key.lod(), null, 0));
             }
             return EXECUTOR.submit(priority, key, () -> {
                 LodChunkData[][] data = {{sources.get(0).join(), sources.get(2).join()}, {sources.get(1).join(), sources.get(3).join()}};
                 byte[] result = generateLod(data);
                 int minSurface = findMinSurface(result);
-                upsertChunkData(key.chunkX(), key.chunkZ(), key.dimension(), key.lod(), result, minSurface);
+                upsertChunkData(key.chunkX(), key.chunkZ(), key.dimension(), key.lod(), result, minSurface, 0L);
                 return new LodChunkData(key.chunkX(), key.chunkZ(), key.dimension(), key.lod(), result, minSurface);
             });
         });
@@ -348,10 +345,6 @@ public class ChunkLodProcessor {
 
     public static void clearQueuedViewportTasks() {
         EXECUTOR.discardQueuedTasksOutside(tag -> false);
-    }
-
-    public static int getCacheSize() {
-        return LOD_CACHE.size();
     }
 
     private static boolean isCoveredByViewport(CacheKey key, Set<CacheKey> visibleKeys) {
