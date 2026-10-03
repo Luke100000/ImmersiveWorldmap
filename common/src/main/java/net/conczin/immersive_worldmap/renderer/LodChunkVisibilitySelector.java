@@ -86,9 +86,6 @@ public class LodChunkVisibilitySelector {
         List<LodChunkMesh> selected = new ArrayList<>();
         List<LodChunkMesh> targetMeshes = new ArrayList<>();
         Map<ChunkLodProcessor.CacheKey, LodChunkMesh> loadedMeshes = new HashMap<>();
-        for (LodChunkMesh mesh : visible) {
-            LodChunkMeshManager.INSTANCE.retain(mesh);
-        }
         for (LodChunkMesh mesh : LodChunkMeshManager.INSTANCE.meshes()) {
             if (mesh.isLoaded()) {
                 loadedMeshes.put(new ChunkLodProcessor.CacheKey(mesh.chunkX, mesh.chunkZ, mesh.dimension, mesh.lod), mesh);
