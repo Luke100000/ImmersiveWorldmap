@@ -3,7 +3,6 @@ package net.conczin.immersive_worldmap.renderer;
 import net.conczin.immersive_worldmap.ImmersiveWorldmap;
 
 import java.util.concurrent.CancellationException;
-import java.util.concurrent.atomic.AtomicLong;
 
 public class LodChunkMesh {
     public final int chunkX;
@@ -16,7 +15,7 @@ public class LodChunkMesh {
     private volatile boolean requested;
     private volatile boolean loaded;
 
-    private final AtomicLong revision = new AtomicLong();
+    private long revision;
     private final long pageGeneration = LodChunkPageManager.INSTANCE.generation();
 
     public LodChunkMesh(int chunkX, int chunkZ, int lod, String dimension) {
@@ -39,48 +38,57 @@ public class LodChunkMesh {
     }
 
     public void requestLoad() {
-        if (requested) return;
-        if (!dirty) {
-            if (!loaded && geometry != null) {
-                LodChunkPageManager.INSTANCE.offer(this, geometry);
+        long requestedRevision;
+        byte[] cached;
+        boolean build;
+        synchronized (this) {
+            if (requested) return;
+            cached = geometry;
+            build = dirty;
+            requestedRevision = revision;
+            if (!build) {
+                if (loaded || cached == null) return;
+            } else {
+                requested = true;
             }
+        }
+        if (!build) {
+            LodChunkPageManager.INSTANCE.offer(this, cached);
             return;
         }
-        requested = true;
-        long requestedRevision = revision.get();
         LodChunkMeshBuilder.buildMeshAsync(chunkX, chunkZ, dimension, lod).whenComplete((result, error) -> {
-            if (error == null && revision.get() == requestedRevision) {
-                byte[] previous = geometry;
-                geometry = result;
-                dirty = false;
-                if (result.length == 0) {
-                    loaded = true;
+            boolean accepted = false;
+            synchronized (this) {
+                if (error == null && revision == requestedRevision) {
+                    geometry = result;
+                    dirty = false;
+                    accepted = true;
                 }
-                if (result.length > 0 || previous != null && previous.length > 0) {
-                    LodChunkPageManager.INSTANCE.offer(this, result);
-                }
+                requested = false;
+            }
+            if (accepted) {
+                LodChunkPageManager.INSTANCE.offer(this, result);
             } else if (error != null && !isCancellation(error)) {
                 ImmersiveWorldmap.LOGGER.error("Failed to load chunk LOD data: {}", error.getMessage());
             }
-            requested = false;
         });
     }
 
-    public void markDirty() {
-        revision.incrementAndGet();
+    public synchronized void markDirty() {
+        revision++;
         dirty = true;
     }
 
-    void onPageUploaded(byte[] uploaded) {
+    synchronized void onPageUploaded(byte[] uploaded) {
         if (geometry == uploaded) loaded = true;
     }
 
-    void onPageEvicted() {
+    synchronized void onPageEvicted() {
         if (geometry != null && geometry.length > 0) loaded = false;
     }
 
-    public void close() {
-        revision.incrementAndGet();
+    public synchronized void close() {
+        revision++;
         geometry = null;
         dirty = true;
         requested = false;

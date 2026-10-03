@@ -13,7 +13,6 @@ import net.minecraft.world.level.chunk.LevelChunkSection;
 import java.sql.SQLException;
 import java.util.*;
 import java.util.concurrent.CompletableFuture;
-import java.util.concurrent.ConcurrentHashMap;
 
 /**
  * Processes chunks and generates LODs.
@@ -22,14 +21,20 @@ public class ChunkLodProcessor {
     public static PriorityThreadPoolExecutor EXECUTOR;
 
     private static final TickLruCache<CacheKey, LodChunkData> LOD_CACHE = new TickLruCache<>(256);
-    private static final Map<CacheKey, CompletableFuture<LodChunkData>> IN_FLIGHT = new ConcurrentHashMap<>();
-    private static final Map<CacheKey, CompletableFuture<LodChunkData>> DIRTY_IN_FLIGHT = new ConcurrentHashMap<>();
+    private static final Object LOD_LOCK = new Object();
+    private static final Map<CacheKey, LodRequest> IN_FLIGHT = new HashMap<>();
+
+    private static final class LodRequest {
+        final CompletableFuture<LodChunkData> future = new CompletableFuture<>();
+        long revision;
+    }
 
     public static void start() {
         EXECUTOR = ThreadPoolUtil.createLowPriorityFixedThreadPool("ImmersiveWorldmap");
-        LOD_CACHE.clear();
-        IN_FLIGHT.clear();
-        DIRTY_IN_FLIGHT.clear();
+        synchronized (LOD_LOCK) {
+            LOD_CACHE.clear();
+            IN_FLIGHT.clear();
+        }
     }
 
     public static void shutdown() {
@@ -134,82 +139,54 @@ public class ChunkLodProcessor {
     }
 
     private static void upsertChunkData(int chunkX, int chunkZ, String dimension, int lod, byte[] data, int minSurface, long packetHash) {
-        try {
-            DatabaseManager.getInstance().upsertChunk(chunkX, chunkZ, dimension, lod, data, minSurface, packetHash);
-            clearLodCacheForLevel(chunkX, chunkZ, dimension, lod);
-            clearParentLodCache(chunkX, chunkZ, dimension, lod);
-            LodChunkMeshManager.INSTANCE.invalidate(chunkX, chunkZ, lod, dimension);
-        } catch (SQLException e) {
-            ImmersiveWorldmap.LOGGER.warn("Failed to store chunk LOD data: {}", e.getMessage());
+        upsertChunkData(new CacheKey(chunkX, chunkZ, dimension, lod), data, minSurface, packetHash, null, 0);
+    }
+
+    private static void upsertChunkData(CacheKey key, byte[] data, int minSurface, long packetHash,
+                                        LodRequest request, long revision) {
+        synchronized (LOD_LOCK) {
+            // A source may have changed while the LOD's children were being loaded or downsampled.
+            if (request != null && (IN_FLIGHT.get(key) != request || request.revision != revision)) {
+                return;
+            }
+            try {
+                DatabaseManager.getInstance().upsertChunk(key.chunkX(), key.chunkZ(), key.dimension(), key.lod(), data, minSurface, packetHash);
+                int x = key.chunkX();
+                int z = key.chunkZ();
+                for (int lod = key.lod(); lod <= LodChunkData.MAX_LOD; lod++) {
+                    CacheKey parent = new CacheKey(x, z, key.dimension(), lod);
+                    LOD_CACHE.remove(parent);
+                    LodRequest pending = IN_FLIGHT.get(parent);
+                    if (pending != null && pending != request) {
+                        pending.revision++;
+                    }
+                    x = Math.floorDiv(x, 2);
+                    z = Math.floorDiv(z, 2);
+                }
+                LodChunkMeshManager.INSTANCE.invalidate(key.chunkX(), key.chunkZ(), key.lod(), key.dimension());
+            } catch (SQLException e) {
+                ImmersiveWorldmap.LOGGER.warn("Failed to store chunk LOD data: {}", e.getMessage());
+            }
         }
     }
 
-    private static void clearLodCacheForLevel(int chunkX, int chunkZ, String dimension, int lod) {
-        CacheKey key = new CacheKey(chunkX, chunkZ, dimension, lod);
-        LOD_CACHE.remove(key);
-    }
-
-    private static void clearParentLodCache(int chunkX, int chunkZ, String dimension, int lod) {
-        LOD_CACHE.removeIf(key -> {
-            if (!key.dimension().equals(dimension) || key.lod() <= lod) return false;
-            int parentX = chunkX;
-            int parentZ = chunkZ;
-            for (int parentLod = lod; parentLod < key.lod(); parentLod++) {
-                parentX = Math.floorDiv(parentX, 2);
-                parentZ = Math.floorDiv(parentZ, 2);
-            }
-            return parentX == key.chunkX() && parentZ == key.chunkZ();
-        });
-    }
-
-    private static CompletableFuture<LodChunkData> loadLodAsync(CacheKey key) {
+    private static CompletableFuture<LodChunkData> loadLodAsync(CacheKey key, LodRequest request, long revision) {
         return EXECUTOR.submit(key.lod(), key, () -> loadStoredChunk(key)).thenCompose(stored -> {
-            if (stored.exists()) {
-                if (key.lod() > 0 && stored.dirty()) {
-                    regenerateDirtyLodAsync(key);
-                }
+            if (stored.exists() && !stored.dirty()) {
                 return CompletableFuture.completedFuture(new LodChunkData(
                         key.chunkX(), key.chunkZ(), key.dimension(), key.lod(), stored.colors(), stored.minSurface()));
             }
             if (key.lod() == 0) {
                 return CompletableFuture.completedFuture(new LodChunkData(key.chunkX(), key.chunkZ(), key.dimension(), 0, null, 0));
             }
-            return generateLodAsync(key);
-        });
-    }
-
-    private static void markDirty(CacheKey key) {
-        if (!DatabaseManager.isInitialized()) return;
-        try {
-            DatabaseManager.getInstance().markDirty(key.chunkX(), key.chunkZ(), key.dimension(), key.lod());
-        } catch (SQLException e) {
-            ImmersiveWorldmap.LOGGER.warn("Failed to restore dirty chunk LOD data: {}", e.getMessage());
-        }
-    }
-
-    private static void regenerateDirtyLodAsync(CacheKey key) {
-        CompletableFuture<LodChunkData> future = new CompletableFuture<>();
-        if (DIRTY_IN_FLIGHT.putIfAbsent(key, future) != null) return;
-
-        future.whenComplete((data, error) -> {
-            if (error == null) {
-                LOD_CACHE.put(key, data);
-            } else {
-                markDirty(key);
-            }
-            DIRTY_IN_FLIGHT.remove(key, future);
-        });
-        generateLodAsync(key, key.lod() + 100).whenComplete((data, error) -> {
-            if (error == null) {
-                future.complete(data);
-            } else {
-                future.completeExceptionally(error);
-            }
+            return generateLodAsync(key, request, revision);
         });
     }
 
     private static ChunkLodDatabase.StoredChunk loadStoredChunk(CacheKey key) {
-        if (!DatabaseManager.isInitialized()) return new ChunkLodDatabase.StoredChunk(false, null, false, 0);
+        if (!DatabaseManager.isInitialized()) {
+            return new ChunkLodDatabase.StoredChunk(false, null, false, 0);
+        }
         try {
             return DatabaseManager.getInstance().loadChunk(key.chunkX(), key.chunkZ(), key.dimension(), key.lod());
         } catch (SQLException e) {
@@ -218,11 +195,7 @@ public class ChunkLodProcessor {
         }
     }
 
-    private static CompletableFuture<LodChunkData> generateLodAsync(CacheKey key) {
-        return generateLodAsync(key, key.lod());
-    }
-
-    private static CompletableFuture<LodChunkData> generateLodAsync(CacheKey key, int priority) {
+    private static CompletableFuture<LodChunkData> generateLodAsync(CacheKey key, LodRequest request, long revision) {
         int baseX = key.chunkX() * 2;
         int baseZ = key.chunkZ() * 2;
         List<CompletableFuture<LodChunkData>> sources = List.of(
@@ -233,14 +206,14 @@ public class ChunkLodProcessor {
         );
         return CompletableFuture.allOf(sources.toArray(CompletableFuture[]::new)).thenCompose(ignored -> {
             if (sources.stream().map(CompletableFuture::join).allMatch(LodChunkData::empty)) {
-                upsertChunkData(key.chunkX(), key.chunkZ(), key.dimension(), key.lod(), null, 0, 0L);
+                upsertChunkData(key, null, 0, 0L, request, revision);
                 return CompletableFuture.completedFuture(new LodChunkData(key.chunkX(), key.chunkZ(), key.dimension(), key.lod(), null, 0));
             }
-            return EXECUTOR.submit(priority, key, () -> {
+            return EXECUTOR.submit(key.lod(), key, () -> {
                 LodChunkData[][] data = {{sources.get(0).join(), sources.get(2).join()}, {sources.get(1).join(), sources.get(3).join()}};
                 byte[] result = generateLod(data);
                 int minSurface = findMinSurface(result);
-                upsertChunkData(key.chunkX(), key.chunkZ(), key.dimension(), key.lod(), result, minSurface, 0L);
+                upsertChunkData(key, result, minSurface, 0L, request, revision);
                 return new LodChunkData(key.chunkX(), key.chunkZ(), key.dimension(), key.lod(), result, minSurface);
             });
         });
@@ -264,7 +237,9 @@ public class ChunkLodProcessor {
         for (int cx = 0; cx < 2; cx++) {
             for (int cz = 0; cz < 2; cz++) {
                 LodChunkData src = sources[cx][cz];
-                if (src.empty()) continue;
+                if (src.empty()) {
+                    continue;
+                }
 
                 // And over all output bytes
                 for (int x = 0; x < 8; x++) {
@@ -317,26 +292,50 @@ public class ChunkLodProcessor {
      */
     public static CompletableFuture<LodChunkData> getLodChunkDataAsync(int chunkX, int chunkZ, String dimension, int lod) {
         CacheKey key = new CacheKey(chunkX, chunkZ, dimension, lod);
-        LodChunkData cached = LOD_CACHE.get(key);
-        if (cached != null) return CompletableFuture.completedFuture(cached);
-        CompletableFuture<LodChunkData> future = new CompletableFuture<>();
-        CompletableFuture<LodChunkData> existing = IN_FLIGHT.putIfAbsent(key, future);
-        if (existing != null) return existing;
+        LodRequest request;
+        synchronized (LOD_LOCK) {
+            LodChunkData cached = LOD_CACHE.get(key);
+            if (cached != null) {
+                return CompletableFuture.completedFuture(cached);
+            }
+            LodRequest existing = IN_FLIGHT.get(key);
+            if (existing != null) {
+                return existing.future;
+            }
+            request = new LodRequest();
+            IN_FLIGHT.put(key, request);
+        }
+        loadRequest(key, request);
+        return request.future;
+    }
 
-        future.whenComplete((data, error) -> {
-            if (error == null) {
-                LOD_CACHE.putIfAbsent(key, data);
+    private static void loadRequest(CacheKey key, LodRequest request) {
+        long revision;
+        synchronized (LOD_LOCK) {
+            revision = request.revision;
+        }
+        loadLodAsync(key, request, revision).whenComplete((data, error) -> {
+            boolean retry;
+            synchronized (LOD_LOCK) {
+                if (IN_FLIGHT.get(key) != request) {
+                    return;
+                }
+                retry = error == null && request.revision != revision;
+                if (!retry) {
+                    if (error == null) {
+                        LOD_CACHE.put(key, data);
+                    }
+                    IN_FLIGHT.remove(key);
+                }
             }
-            IN_FLIGHT.remove(key, future);
-        });
-        loadLodAsync(key).whenComplete((data, error) -> {
-            if (error == null) {
-                future.complete(data);
+            if (retry) {
+                loadRequest(key, request);
+            } else if (error == null) {
+                request.future.complete(data);
             } else {
-                future.completeExceptionally(error);
+                request.future.completeExceptionally(error);
             }
         });
-        return future;
     }
 
     public static void discardQueuedTasksOutside(Set<CacheKey> visibleKeys) {
@@ -348,15 +347,14 @@ public class ChunkLodProcessor {
     }
 
     private static boolean isCoveredByViewport(CacheKey key, Set<CacheKey> visibleKeys) {
-        for (CacheKey visible : visibleKeys) {
-            if (!key.dimension().equals(visible.dimension()) || key.lod() > visible.lod()) continue;
-            int chunkX = key.chunkX();
-            int chunkZ = key.chunkZ();
-            for (int lod = key.lod(); lod < visible.lod(); lod++) {
-                chunkX = Math.floorDiv(chunkX, 2);
-                chunkZ = Math.floorDiv(chunkZ, 2);
+        int chunkX = key.chunkX();
+        int chunkZ = key.chunkZ();
+        for (int lod = key.lod(); lod <= LodChunkData.MAX_LOD; lod++) {
+            if (visibleKeys.contains(new CacheKey(chunkX, chunkZ, key.dimension(), lod))) {
+                return true;
             }
-            if (chunkX == visible.chunkX() && chunkZ == visible.chunkZ()) return true;
+            chunkX = Math.floorDiv(chunkX, 2);
+            chunkZ = Math.floorDiv(chunkZ, 2);
         }
         return false;
     }

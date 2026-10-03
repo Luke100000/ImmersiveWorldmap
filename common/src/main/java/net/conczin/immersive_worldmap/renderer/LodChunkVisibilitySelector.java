@@ -43,10 +43,7 @@ public class LodChunkVisibilitySelector {
 
     private final AtomicReference<CameraSnapshot> pendingSnapshot = new AtomicReference<>(null);
 
-    @SuppressWarnings("unchecked")
-    private final List<LodChunkMesh>[] buffers = new List[]{new ArrayList<>(), new ArrayList<>()};
-    private volatile int readIndex = 0;
-    private int writeIndex = 1;
+    private volatile List<LodChunkMesh> visible = List.of();
 
     private final Thread worker;
     private volatile boolean running = true;
@@ -60,16 +57,18 @@ public class LodChunkVisibilitySelector {
     public void shutdown() {
         running = false;
         worker.interrupt();
+        try {
+            worker.join();
+        } catch (InterruptedException e) {
+            Thread.currentThread().interrupt();
+        }
     }
 
     private void workerLoop() {
         while (running) {
             CameraSnapshot snapshot = waitForSnapshot();
             if (snapshot == null) continue;
-            buffers[writeIndex] = buildVisibleList(snapshot);
-            int tmp = readIndex;
-            readIndex = writeIndex;
-            writeIndex = tmp;
+            visible = buildVisibleList(snapshot);
         }
     }
 
@@ -87,7 +86,10 @@ public class LodChunkVisibilitySelector {
         List<LodChunkMesh> selected = new ArrayList<>();
         List<LodChunkMesh> targetMeshes = new ArrayList<>();
         Map<ChunkLodProcessor.CacheKey, LodChunkMesh> loadedMeshes = new HashMap<>();
-        for (LodChunkMesh mesh : buffers[readIndex]) {
+        for (LodChunkMesh mesh : visible) {
+            LodChunkMeshManager.INSTANCE.retain(mesh);
+        }
+        for (LodChunkMesh mesh : LodChunkMeshManager.INSTANCE.meshes()) {
             if (mesh.isLoaded()) {
                 loadedMeshes.put(new ChunkLodProcessor.CacheKey(mesh.chunkX, mesh.chunkZ, mesh.dimension, mesh.lod), mesh);
             }
@@ -102,7 +104,7 @@ public class LodChunkVisibilitySelector {
         int rootRadius = (int) Math.ceil(radius / rootWorldSize) + 1;
 
         CircularChunkIterator roots = new CircularChunkIterator(centerX, centerZ, rootRadius);
-        while (roots.hasNext()) {
+        while (running && roots.hasNext()) {
             int[] root = roots.next();
             visit(root[0], root[1], LodChunkData.MAX_LOD, targetLod, radius, snapshot, frustum,
                     loadedMeshes, targetMeshes, selected);
@@ -111,10 +113,14 @@ public class LodChunkVisibilitySelector {
         Comparator<LodChunkMesh> byDistance = Comparator.comparingDouble(mesh -> distanceSquared(mesh, snapshot));
         targetMeshes.sort(byDistance);
         selected.sort(byDistance);
-        for (LodChunkMesh mesh : targetMeshes) {
+        Set<LodChunkMesh> interested = new LinkedHashSet<>(targetMeshes);
+        interested.addAll(selected);
+        for (LodChunkMesh mesh : interested) {
+            if (!running) return List.of();
+            LodChunkMeshManager.INSTANCE.retain(mesh);
             mesh.requestLoad();
         }
-        updateTaskInterest(targetMeshes);
+        updateTaskInterest(new ArrayList<>(interested));
         return selected;
     }
 
@@ -227,6 +233,6 @@ public class LodChunkVisibilitySelector {
     }
 
     public List<LodChunkMesh> visibleChunks() {
-        return buffers[readIndex];
+        return visible;
     }
 }

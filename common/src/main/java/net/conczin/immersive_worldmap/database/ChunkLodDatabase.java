@@ -136,6 +136,7 @@ public class ChunkLodDatabase implements AutoCloseable {
                     colors = excluded.colors,
                     min_surface = excluded.min_surface,
                     empty = excluded.empty,
+                    dirty = 0,
                     hash = excluded.hash
                 """;
 
@@ -204,16 +205,6 @@ public class ChunkLodDatabase implements AutoCloseable {
             }
         }
 
-        if (dirty) {
-            String clearDirtySql = "UPDATE chunk_lod SET dirty = 0 WHERE x = ? AND z = ? AND dimension = ? AND lod = ? AND dirty = 1";
-            try (PreparedStatement pstmt = connection.prepareStatement(clearDirtySql)) {
-                pstmt.setInt(1, x);
-                pstmt.setInt(2, z);
-                pstmt.setString(3, dimension);
-                pstmt.setInt(4, lod);
-                dirty = pstmt.executeUpdate() == 1;
-            }
-        }
         return new StoredChunk(true, colors, dirty, minSurface);
     }
 

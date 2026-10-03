@@ -69,11 +69,16 @@ public final class TickLruCache<K, V> {
         entries.keySet().removeIf(predicate);
     }
 
-    public synchronized List<V> clear() {
+    public synchronized List<V> values() {
         List<V> values = new ArrayList<>(entries.size());
         for (Entry<V> entry : entries.values()) {
             values.add(entry.value);
         }
+        return values;
+    }
+
+    public synchronized List<V> clear() {
+        List<V> values = values();
         entries.clear();
         return values;
     }

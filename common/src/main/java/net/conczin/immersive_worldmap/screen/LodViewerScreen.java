@@ -14,6 +14,7 @@ import net.minecraft.client.gui.screens.Screen;
 import net.minecraft.network.chat.Component;
 import net.minecraft.world.level.LightLayer;
 import org.joml.Matrix4f;
+import org.lwjgl.opengl.GL11;
 
 import java.util.HashSet;
 import java.util.List;
@@ -157,6 +158,9 @@ public class LodViewerScreen extends Screen {
 
         List<LodChunkMesh> visible = LodChunkVisibilitySelector.get().visibleChunks();
 
+        graphics.flush();
+        RenderSystem.depthMask(true);
+        RenderSystem.clear(GL11.GL_DEPTH_BUFFER_BIT, Minecraft.ON_OSX);
         RenderSystem.enableDepthTest();
         RenderSystem.disableBlend();
         RenderSystem.enableCull();
@@ -167,6 +171,7 @@ public class LodViewerScreen extends Screen {
 
         RenderSystem.disableCull();
         RenderSystem.disableDepthTest();
+        RenderSystem.clear(GL11.GL_DEPTH_BUFFER_BIT, Minecraft.ON_OSX);
 
         String closeKey = ImmersiveWorldmap.MAP_VIEWER_KEY.getTranslatedKeyMessage().getString();
         String controls = "LMB: orbit   RMB: pan   Wheel: zoom   WASD/Arrows: pan   Tab: cave view   " + closeKey + ": close";

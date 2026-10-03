@@ -283,7 +283,7 @@ public final class LodChunkPageManager {
 
         synchronized void built(PageBuild build) {
             building = false;
-            if (closed || revision != build.snapshot.revision) {
+            if (closed) {
                 build.close();
                 queueBuild();
                 return;
@@ -291,13 +291,14 @@ public final class LodChunkPageManager {
             if (ready != null) ready.close();
             ready = build;
             uploadQueue.offer(this);
+            if (revision != build.snapshot.revision) queueBuild();
         }
 
         synchronized PageBuild takeReady() {
             PageBuild result = ready;
             ready = null;
             if (result == null) return null;
-            if (closed || result.snapshot.revision != revision) {
+            if (closed) {
                 result.close();
                 queueBuild();
                 return null;
@@ -346,9 +347,8 @@ public final class LodChunkPageManager {
             bases.clear();
             offsets.clear();
             for (LodChunkMesh chunk : selected) {
-                byte[] geometry = chunk.geometry();
-                if (geometry != null && geometry.length == 0) continue;
                 int slot = slot(chunk);
+                if (installedChunks[slot] != chunk) continue;
                 int indexCount = indexCounts[slot];
                 if (indexCount == 0) continue;
                 counts.put(indexCount);

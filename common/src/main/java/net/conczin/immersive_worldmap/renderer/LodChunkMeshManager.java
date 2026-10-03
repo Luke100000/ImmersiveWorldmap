@@ -4,6 +4,8 @@ import net.conczin.immersive_worldmap.lod.ChunkLodProcessor;
 import net.conczin.immersive_worldmap.lod.LodChunkData;
 import net.conczin.immersive_worldmap.util.TickLruCache;
 
+import java.util.List;
+
 public final class LodChunkMeshManager {
     public static final LodChunkMeshManager INSTANCE = new LodChunkMeshManager();
 
@@ -13,7 +15,7 @@ public final class LodChunkMeshManager {
 
     private final TickLruCache<ChunkLodProcessor.CacheKey, LodChunkMesh> cache = new TickLruCache<>(4096);
 
-    public LodChunkMesh get(int cx, int cz, int lod, String dimension) {
+    public synchronized LodChunkMesh get(int cx, int cz, int lod, String dimension) {
         ChunkLodProcessor.CacheKey key = new ChunkLodProcessor.CacheKey(cx, cz, dimension, lod);
         LodChunkMesh existing = cache.get(key);
         if (existing != null) return existing;
@@ -22,14 +24,22 @@ public final class LodChunkMeshManager {
         return mesh;
     }
 
-    public void clear() {
+    public List<LodChunkMesh> meshes() {
+        return cache.values();
+    }
+
+    synchronized void retain(LodChunkMesh mesh) {
+        cache.putIfAbsent(new ChunkLodProcessor.CacheKey(mesh.chunkX, mesh.chunkZ, mesh.dimension, mesh.lod), mesh);
+    }
+
+    public synchronized void clear() {
         LodChunkPageManager.INSTANCE.clear();
         for (LodChunkMesh mesh : cache.clear()) {
             mesh.close();
         }
     }
 
-    public void invalidate(int cx, int cz, int lod, String dimension) {
+    public synchronized void invalidate(int cx, int cz, int lod, String dimension) {
         for (int parentLod = lod; parentLod <= LodChunkData.MAX_LOD; parentLod++) {
             for (int dx = -1; dx <= 1; dx++) {
                 for (int dz = -1; dz <= 1; dz++) {
@@ -40,9 +50,5 @@ public final class LodChunkMeshManager {
             cx = Math.floorDiv(cx, 2);
             cz = Math.floorDiv(cz, 2);
         }
-    }
-
-    public int getCacheSize() {
-        return cache.size();
     }
 }
