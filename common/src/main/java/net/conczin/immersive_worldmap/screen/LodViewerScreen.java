@@ -199,7 +199,7 @@ public class LodViewerScreen extends Screen {
         RenderSystem.disableDepthTest();
         RenderSystem.clear(GL11.GL_DEPTH_BUFFER_BIT, Minecraft.ON_OSX);
 
-        renderPlayers(graphics, mv, proj, partialTick);
+        renderPlayers(graphics, mv, proj);
 
         if (minecraft.getDebugOverlay().showDebugScreen()) {
             int tasks = ChunkLodProcessor.getPendingTaskCount() + LodChunkPageManager.INSTANCE.getPendingTaskCount();
@@ -224,7 +224,7 @@ public class LodViewerScreen extends Screen {
         graphics.drawString(this.font, text, x, y, 0xFFFFFFFF);
     }
 
-    private void renderPlayers(GuiGraphics graphics, Matrix4f mv, Matrix4f proj, float partialTick) {
+    private void renderPlayers(GuiGraphics graphics, Matrix4f mv, Matrix4f proj) {
         if (minecraft.level == null || !minecraft.level.dimension().location().toString().equals(dimension)) {
             return;
         }
@@ -232,6 +232,7 @@ public class LodViewerScreen extends Screen {
         Matrix4f viewProjection = new Matrix4f(proj).mul(mv);
         Vector4f position = new Vector4f();
         for (AbstractClientPlayer player : minecraft.level.players()) {
+            float partialTick = minecraft.getTimer().getGameTimeDeltaPartialTick(!minecraft.level.tickRateManager().isEntityFrozen(player));
             Vec3 worldPosition = player.getPosition(partialTick);
             position.set((float) worldPosition.x,
                     (float) (worldPosition.y - minecraft.level.getMinBuildHeight()),
@@ -244,13 +245,19 @@ public class LodViewerScreen extends Screen {
                 continue;
             }
 
-            int x = Math.round((position.x / position.w + 1f) * width * 0.5f) - PLAYER_MARKER_SIZE / 2;
-            int y = Math.round((1f - position.y / position.w) * height * 0.5f) - PLAYER_MARKER_SIZE / 2;
-            graphics.fill(x - 1, y - 1, x + PLAYER_MARKER_SIZE + 1, y + PLAYER_MARKER_SIZE + 1, 0xFF000000);
-            graphics.flush();
-            RenderSystem.disableDepthTest();
-            PlayerFaceRenderer.draw(graphics, player.getSkin().texture(), x, y, PLAYER_MARKER_SIZE,
-                    player.isModelPartShown(PlayerModelPart.HAT), LivingEntityRenderer.isEntityUpsideDown(player));
+            float x = (position.x / position.w + 1f) * width * 0.5f - PLAYER_MARKER_SIZE / 2f;
+            float y = (1f - position.y / position.w) * height * 0.5f - PLAYER_MARKER_SIZE / 2f;
+            graphics.pose().pushPose();
+            try {
+                graphics.pose().translate(x, y, 0f);
+                graphics.fill(-1, -1, PLAYER_MARKER_SIZE + 1, PLAYER_MARKER_SIZE + 1, 0xFF000000);
+                graphics.flush();
+                RenderSystem.disableDepthTest();
+                PlayerFaceRenderer.draw(graphics, player.getSkin().texture(), 0, 0, PLAYER_MARKER_SIZE,
+                        player.isModelPartShown(PlayerModelPart.HAT), LivingEntityRenderer.isEntityUpsideDown(player));
+            } finally {
+                graphics.pose().popPose();
+            }
         }
     }
 
