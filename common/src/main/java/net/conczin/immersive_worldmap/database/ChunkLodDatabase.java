@@ -5,6 +5,8 @@ import net.conczin.immersive_worldmap.util.CompressionUtil;
 
 import java.nio.file.Path;
 import java.sql.*;
+import java.util.HashMap;
+import java.util.Map;
 import java.util.Set;
 import java.util.concurrent.ConcurrentHashMap;
 
@@ -19,7 +21,9 @@ public class ChunkLodDatabase implements AutoCloseable {
 
     private final String databaseUrl;
     private final ThreadLocal<Connection> threadConnection = new ThreadLocal<>();
+    private final ThreadLocal<Map<String, PreparedStatement>> threadStatements = ThreadLocal.withInitial(HashMap::new);
     private final Set<Connection> openConnections = ConcurrentHashMap.newKeySet();
+    private final Set<PreparedStatement> openStatements = ConcurrentHashMap.newKeySet();
     private final Object lifecycleLock = new Object();
     private volatile boolean closed;
 
@@ -54,6 +58,7 @@ public class ChunkLodDatabase implements AutoCloseable {
             Connection connection = openConnection();
             openConnections.add(connection);
             threadConnection.set(connection);
+            threadStatements.remove();
             return connection;
         }
     }
@@ -62,8 +67,20 @@ public class ChunkLodDatabase implements AutoCloseable {
         Connection connection = DriverManager.getConnection(databaseUrl);
         try (Statement statement = connection.createStatement()) {
             statement.execute("PRAGMA busy_timeout=5000");
+            statement.execute("PRAGMA synchronous=NORMAL");
         }
         return connection;
+    }
+
+    private PreparedStatement prepare(Connection connection, String sql) throws SQLException {
+        Map<String, PreparedStatement> statements = threadStatements.get();
+        PreparedStatement statement = statements.get(sql);
+        if (statement == null || statement.isClosed()) {
+            statement = connection.prepareStatement(sql);
+            statements.put(sql, statement);
+            openStatements.add(statement);
+        }
+        return statement;
     }
 
     private void initializeSchema(Connection connection) throws SQLException {
@@ -140,27 +157,27 @@ public class ChunkLodDatabase implements AutoCloseable {
                     hash = excluded.hash
                 """;
 
-        try (PreparedStatement pstmt = connection.prepareStatement(sql)) {
-            pstmt.setInt(1, x);
-            pstmt.setInt(2, z);
-            pstmt.setString(3, dimension);
-            pstmt.setInt(4, lod);
-            pstmt.setInt(6, minSurface);
-            pstmt.setLong(8, packetHash);
-            if (colors == null) {
-                pstmt.setNull(5, Types.BLOB);
-                pstmt.setBoolean(7, true);
-            } else {
-                pstmt.setBytes(5, CompressionUtil.compress(colors));
-                pstmt.setBoolean(7, false);
-            }
-            pstmt.executeUpdate();
+        PreparedStatement pstmt = prepare(connection, sql);
+        pstmt.setInt(1, x);
+        pstmt.setInt(2, z);
+        pstmt.setString(3, dimension);
+        pstmt.setInt(4, lod);
+        pstmt.setInt(6, minSurface);
+        pstmt.setLong(8, packetHash);
+        if (colors == null) {
+            pstmt.setNull(5, Types.BLOB);
+            pstmt.setBoolean(7, true);
+        } else {
+            pstmt.setBytes(5, CompressionUtil.compress(colors));
+            pstmt.setBoolean(7, false);
         }
+        pstmt.executeUpdate();
     }
 
     private void markParentsDirty(Connection connection, int x, int z, String dimension, int lod) throws SQLException {
         String sql = "UPDATE chunk_lod SET dirty = 1 WHERE x = ? AND z = ? AND dimension = ? AND lod = ?";
-        try (PreparedStatement statement = connection.prepareStatement(sql)) {
+        PreparedStatement statement = prepare(connection, sql);
+        try {
             for (int parentLod = lod + 1; parentLod <= LodChunkData.MAX_LOD; parentLod++) {
                 x = Math.floorDiv(x, 2);
                 z = Math.floorDiv(z, 2);
@@ -168,8 +185,11 @@ public class ChunkLodDatabase implements AutoCloseable {
                 statement.setInt(2, z);
                 statement.setString(3, dimension);
                 statement.setInt(4, parentLod);
-                statement.executeUpdate();
+                statement.addBatch();
             }
+            statement.executeBatch();
+        } finally {
+            statement.clearBatch();
         }
     }
 
@@ -190,19 +210,18 @@ public class ChunkLodDatabase implements AutoCloseable {
         boolean dirty;
         int minSurface;
 
-        try (PreparedStatement pstmt = connection.prepareStatement(sql)) {
-            pstmt.setInt(1, x);
-            pstmt.setInt(2, z);
-            pstmt.setString(3, dimension);
-            pstmt.setInt(4, lod);
+        PreparedStatement pstmt = prepare(connection, sql);
+        pstmt.setInt(1, x);
+        pstmt.setInt(2, z);
+        pstmt.setString(3, dimension);
+        pstmt.setInt(4, lod);
 
-            try (ResultSet rs = pstmt.executeQuery()) {
-                if (!rs.next()) return new StoredChunk(false, null, false, 0);
-                byte[] compressed = rs.getBytes("colors");
-                colors = compressed == null ? null : CompressionUtil.decompress(compressed);
-                dirty = rs.getBoolean("dirty");
-                minSurface = rs.getInt("min_surface");
-            }
+        try (ResultSet rs = pstmt.executeQuery()) {
+            if (!rs.next()) return new StoredChunk(false, null, false, 0);
+            byte[] compressed = rs.getBytes("colors");
+            colors = compressed == null ? null : CompressionUtil.decompress(compressed);
+            dirty = rs.getBoolean("dirty");
+            minSurface = rs.getInt("min_surface");
         }
 
         return new StoredChunk(true, colors, dirty, minSurface);
@@ -212,27 +231,25 @@ public class ChunkLodDatabase implements AutoCloseable {
     public Long getPacketHash(int x, int z, String dimension, int lod) throws SQLException {
         Connection connection = getConnection();
         String sql = "SELECT hash FROM chunk_lod WHERE x = ? AND z = ? AND dimension = ? AND lod = ?";
-        try (PreparedStatement pstmt = connection.prepareStatement(sql)) {
-            pstmt.setInt(1, x);
-            pstmt.setInt(2, z);
-            pstmt.setString(3, dimension);
-            pstmt.setInt(4, lod);
-            try (ResultSet rs = pstmt.executeQuery()) {
-                return rs.next() ? rs.getLong(1) : null;
-            }
+        PreparedStatement pstmt = prepare(connection, sql);
+        pstmt.setInt(1, x);
+        pstmt.setInt(2, z);
+        pstmt.setString(3, dimension);
+        pstmt.setInt(4, lod);
+        try (ResultSet rs = pstmt.executeQuery()) {
+            return rs.next() ? rs.getLong(1) : null;
         }
     }
 
     public void markDirty(int x, int z, String dimension, int lod) throws SQLException {
         Connection connection = getConnection();
         String sql = "UPDATE chunk_lod SET dirty = 1 WHERE x = ? AND z = ? AND dimension = ? AND lod = ?";
-        try (PreparedStatement pstmt = connection.prepareStatement(sql)) {
-            pstmt.setInt(1, x);
-            pstmt.setInt(2, z);
-            pstmt.setString(3, dimension);
-            pstmt.setInt(4, lod);
-            pstmt.executeUpdate();
-        }
+        PreparedStatement pstmt = prepare(connection, sql);
+        pstmt.setInt(1, x);
+        pstmt.setInt(2, z);
+        pstmt.setString(3, dimension);
+        pstmt.setInt(4, lod);
+        pstmt.executeUpdate();
     }
 
     /**
@@ -248,13 +265,12 @@ public class ChunkLodDatabase implements AutoCloseable {
         Connection connection = getConnection();
         String sql = "DELETE FROM chunk_lod WHERE x = ? AND z = ? AND dimension = ? AND lod = ?";
 
-        try (PreparedStatement pstmt = connection.prepareStatement(sql)) {
-            pstmt.setInt(1, x);
-            pstmt.setInt(2, z);
-            pstmt.setString(3, dimension);
-            pstmt.setInt(4, lod);
-            pstmt.executeUpdate();
-        }
+        PreparedStatement pstmt = prepare(connection, sql);
+        pstmt.setInt(1, x);
+        pstmt.setInt(2, z);
+        pstmt.setString(3, dimension);
+        pstmt.setInt(4, lod);
+        pstmt.executeUpdate();
     }
 
     /**
@@ -267,26 +283,33 @@ public class ChunkLodDatabase implements AutoCloseable {
         Connection connection = getConnection();
         String sql = "DELETE FROM chunk_lod WHERE dimension = ?";
 
-        try (PreparedStatement pstmt = connection.prepareStatement(sql)) {
-            pstmt.setString(1, dimension);
-            pstmt.executeUpdate();
-        }
+        PreparedStatement pstmt = prepare(connection, sql);
+        pstmt.setString(1, dimension);
+        pstmt.executeUpdate();
     }
 
     public void clearGeneratedLods(String dimension) throws SQLException {
         Connection connection = getConnection();
         String sql = "DELETE FROM chunk_lod WHERE dimension = ? AND lod > 0";
 
-        try (PreparedStatement pstmt = connection.prepareStatement(sql)) {
-            pstmt.setString(1, dimension);
-            pstmt.executeUpdate();
-        }
+        PreparedStatement pstmt = prepare(connection, sql);
+        pstmt.setString(1, dimension);
+        pstmt.executeUpdate();
     }
 
     @Override
     public void close() {
         synchronized (lifecycleLock) {
             closed = true;
+            for (PreparedStatement statement : openStatements) {
+                try {
+                    statement.close();
+                } catch (SQLException ignored) {
+                    // The owning connection is closed below.
+                }
+            }
+            openStatements.clear();
+            threadStatements.remove();
             try {
                 for (Connection connection : openConnections) {
                     connection.close();
