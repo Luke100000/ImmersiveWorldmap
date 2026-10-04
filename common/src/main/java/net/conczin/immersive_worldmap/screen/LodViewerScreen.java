@@ -63,7 +63,7 @@ public class LodViewerScreen extends Screen {
         SharedSettings.caveView = minecraft.level.getBrightness(LightLayer.SKY, minecraft.player.blockPosition()) == 0;
         SharedSettings.caveViewBaselineY = (int) Math.floor(minecraft.player.getY()) - minecraft.level.getMinBuildHeight();
         camera.setZoom(SharedSettings.caveView ? 150f : 225f);
-        camera.setRotation(45f, SharedSettings.caveView ? -60 : -45f);
+        camera.setRotation(135f, SharedSettings.caveView ? -60 : -45f);
     }
 
     private void clearMeshes() {
@@ -163,9 +163,9 @@ public class LodViewerScreen extends Screen {
         LodChunkMeshManager.tick();
 
         float zoom = camera.getSmoothZoom() * (1f + 0.3f * openingBonus);
+        float yawDegrees = camera.getSmoothYaw() + 10f * openingBonus;
         Matrix4f mv, proj;
         {
-            float yawDegrees = camera.getSmoothYaw() + 10f * openingBonus;
             float pitchDegrees = camera.getSmoothPitch() - 10f * openingBonus;
             float yaw = (float) Math.toRadians(yawDegrees);
             float pitch = (float) Math.toRadians(pitchDegrees);
@@ -209,6 +209,8 @@ public class LodViewerScreen extends Screen {
         String closeKey = ImmersiveWorldmap.MAP_VIEWER_KEY.getTranslatedKeyMessage().getString();
         String controls = "LMB: pan   RMB: orbit   Wheel: zoom   WASD/Arrows: pan   Q/E: rotate   Tab: cave view   " + closeKey + ": close";
         drawOverlay(graphics, controls, 20, this.height - 20);
+
+        MapCompass.render(graphics, font, yawDegrees, width, height);
 
         int fadeAlpha = Math.round(openingBonus * 255f);
         if (fadeAlpha > 0) {
