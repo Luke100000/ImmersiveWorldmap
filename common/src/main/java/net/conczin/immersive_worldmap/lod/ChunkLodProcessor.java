@@ -1,18 +1,20 @@
 package net.conczin.immersive_worldmap.lod;
 
 import net.conczin.immersive_worldmap.ImmersiveWorldmap;
-import net.conczin.immersive_worldmap.database.DatabaseManager;
 import net.conczin.immersive_worldmap.database.ChunkLodDatabase;
+import net.conczin.immersive_worldmap.database.DatabaseManager;
 import net.conczin.immersive_worldmap.renderer.LodChunkMeshManager;
-import net.conczin.immersive_worldmap.util.ThreadPoolUtil;
 import net.conczin.immersive_worldmap.util.PriorityThreadPoolExecutor;
+import net.conczin.immersive_worldmap.util.ThreadPoolUtil;
 import net.conczin.immersive_worldmap.util.TickLruCache;
+import net.minecraft.world.level.block.state.BlockState;
 import net.minecraft.world.level.chunk.LevelChunk;
-import net.minecraft.world.level.chunk.LevelChunkSection;
+import net.minecraft.world.level.chunk.PalettedContainer;
 
 import java.sql.SQLException;
 import java.util.*;
 import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.ConcurrentHashMap;
 
 /**
  * Processes chunks and generates LODs.
@@ -23,6 +25,7 @@ public class ChunkLodProcessor {
     private static final TickLruCache<CacheKey, LodChunkData> LOD_CACHE = new TickLruCache<>(256);
     private static final Object LOD_LOCK = new Object();
     private static final Map<CacheKey, LodRequest> IN_FLIGHT = new HashMap<>();
+    private static final Map<CacheKey, Object> CHUNK_INGESTS = new ConcurrentHashMap<>();
 
     private static final class LodRequest {
         final CompletableFuture<LodChunkData> future = new CompletableFuture<>();
@@ -30,6 +33,7 @@ public class ChunkLodProcessor {
     }
 
     public static void start() {
+        CHUNK_INGESTS.clear();
         EXECUTOR = ThreadPoolUtil.createLowPriorityFixedThreadPool("ImmersiveWorldmap");
         synchronized (LOD_LOCK) {
             LOD_CACHE.clear();
@@ -40,6 +44,7 @@ public class ChunkLodProcessor {
     public static void shutdown() {
         EXECUTOR.shutdownNow();
         EXECUTOR.close();
+        CHUNK_INGESTS.clear();
     }
 
     public static int getPendingTaskCount() {
@@ -54,8 +59,28 @@ public class ChunkLodProcessor {
     }
 
     public static void processChunk(LevelChunk chunk, long packetHash) {
-        EXECUTOR.submit(0, () -> {
-            processChunkSync(chunk, packetHash);
+        processChunk(chunk, packetHash, 0);
+    }
+
+    public static void processChunk(LevelChunk chunk) {
+        // Zero disables packet-hash deduplication for partial updates.
+        processChunk(chunk, 0L, Integer.MAX_VALUE);
+    }
+
+    private static void processChunk(LevelChunk chunk, long packetHash, int priority) {
+        if (EXECUTOR == null || EXECUTOR.isShutdown() || !DatabaseManager.isInitialized()) return;
+        CacheKey key = new CacheKey(chunk.getPos().x, chunk.getPos().z, chunk.getLevel().dimension().location().toString(), 0);
+        // Copy palettes on the client thread; workers never retain live chunks.
+        List<PalettedContainer<BlockState>> sections = Arrays.stream(chunk.getSections())
+                .map(section -> section.hasOnlyAir() ? null : section.getStates().copy()).toList();
+        Object revision = new Object();
+        CHUNK_INGESTS.put(key, revision);
+        EXECUTOR.submit(priority, () -> {
+            try {
+                processChunkSync(key, sections, packetHash, revision);
+            } finally {
+                CHUNK_INGESTS.remove(key, revision);
+            }
             return null;
         });
     }
@@ -64,18 +89,14 @@ public class ChunkLodProcessor {
         return (x * height * 16) + (y * 16) + z;
     }
 
-    private static void processChunkSync(LevelChunk chunk, long packetHash) {
-        if (!DatabaseManager.isInitialized()) {
+    private static void processChunkSync(CacheKey key, List<PalettedContainer<BlockState>> sections, long packetHash, Object revision) {
+        if (!DatabaseManager.isInitialized() || CHUNK_INGESTS.get(key) != revision) {
             return;
         }
 
-        int chunkX = chunk.getPos().x;
-        int chunkZ = chunk.getPos().z;
-        String dimension = chunk.getLevel().dimension().location().toString();
-
         // Skip chunks whose packet bytes are identical to the last ingest
         try {
-            Long storedHash = DatabaseManager.getInstance().getPacketHash(chunkX, chunkZ, dimension, 0);
+            Long storedHash = packetHash == 0L ? null : DatabaseManager.getInstance().getPacketHash(key.chunkX(), key.chunkZ(), key.dimension(), 0);
             if (storedHash != null && storedHash == packetHash) {
                 return;
             }
@@ -83,41 +104,21 @@ public class ChunkLodProcessor {
             ImmersiveWorldmap.LOGGER.warn("Failed to read chunk packet hash: {}", e.getMessage());
         }
 
-        // Chunk is empty
-        if (chunk.isEmpty()) {
-            upsertChunkData(chunkX, chunkZ, dimension, 0, null, 0, packetHash);
-            return;
-        }
-
-        // Check if at least one section is not empty
-        boolean empty = true;
-        LevelChunkSection[] sections = chunk.getSections();
-        for (LevelChunkSection section : sections) {
-            if (!section.hasOnlyAir()) {
-                empty = false;
-                break;
-            }
-        }
-        if (empty) {
-            upsertChunkData(chunkX, chunkZ, dimension, 0, null, 0, packetHash);
-            return;
-        }
-
         // Full vertical chunk: 16 x height x 16 bytes for LOD 0
-        int height = chunk.getHeight();
-        byte[] chunkData = new byte[16 * height * 16];
+        int height = sections.size() * 16;
+        byte[] chunkData = sections.stream().allMatch(Objects::isNull) ? null : new byte[16 * height * 16];
 
         // Process all blocks in the chunk column
-        for (int sectionIndex = 0; sectionIndex < sections.length; sectionIndex++) {
-            LevelChunkSection section = sections[sectionIndex];
-            if (section.hasOnlyAir()) {
+        for (int sectionIndex = 0; sectionIndex < sections.size(); sectionIndex++) {
+            PalettedContainer<BlockState> section = sections.get(sectionIndex);
+            if (section == null) {
                 continue;
             }
 
             for (int x = 0; x < 16; x++) {
                 for (int y = 0; y < 16; y++) {
                     for (int z = 0; z < 16; z++) {
-                        int color = section.getBlockState(x, y, z).getBlock().defaultMapColor().id;
+                        int color = section.get(x, y, z).getBlock().defaultMapColor().id;
                         int ay = (sectionIndex * 16) + y;
                         int blockIndex = getBlockIndex(height, x, ay, z);
                         chunkData[blockIndex] = (byte) color;
@@ -126,7 +127,13 @@ public class ChunkLodProcessor {
             }
         }
 
-        upsertChunkData(chunkX, chunkZ, dimension, 0, chunkData, findMinSurface(chunkData), packetHash);
+        int minSurface = chunkData == null ? 0 : findMinSurface(chunkData);
+        synchronized (LOD_LOCK) {
+            // An older queued snapshot must not overwrite a newer full or partial update.
+            if (CHUNK_INGESTS.get(key) == revision) {
+                upsertChunkData(key.chunkX(), key.chunkZ(), key.dimension(), 0, chunkData, minSurface, packetHash);
+            }
+        }
     }
 
     // Lowest surface height in the chunk, 0 when no column has one
