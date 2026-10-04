@@ -42,6 +42,11 @@ public class ChunkLodProcessor {
         EXECUTOR.close();
     }
 
+    public static int getPendingTaskCount() {
+        PriorityThreadPoolExecutor executor = EXECUTOR;
+        return executor == null ? 0 : executor.getActiveCount() + executor.getQueue().size();
+    }
+
     public static void processChunk(LevelChunk chunk, long packetHash) {
         EXECUTOR.submit(0, () -> {
             processChunkSync(chunk, packetHash);

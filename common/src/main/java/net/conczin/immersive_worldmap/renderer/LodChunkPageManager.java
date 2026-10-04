@@ -54,6 +54,10 @@ public final class LodChunkPageManager {
     private LodChunkPageManager() {
     }
 
+    public int getPendingTaskCount() {
+        return buildExecutor.getActiveCount() + buildExecutor.getQueue().size() + uploadQueue.size();
+    }
+
     synchronized long generation() {
         return generation;
     }

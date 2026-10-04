@@ -182,15 +182,20 @@ public class LodViewerScreen extends Screen {
 
         renderPlayers(graphics, mv, proj, partialTick);
 
+        int tasks = ChunkLodProcessor.getPendingTaskCount() + LodChunkPageManager.INSTANCE.getPendingTaskCount();
+        drawOverlay(graphics, "Tasks: " + tasks, 20, 20);
+
         String closeKey = ImmersiveWorldmap.MAP_VIEWER_KEY.getTranslatedKeyMessage().getString();
-        String controls = "LMB: orbit   RMB: pan   Wheel: zoom   WASD/Arrows: pan   Tab: cave view   " + closeKey + ": close";
+        String controls = "LMB: pan   RMB: orbit   Wheel: zoom   WASD/Arrows: pan   Q/E: rotate   Tab: cave view   " + closeKey + ": close";
+        drawOverlay(graphics, controls, 20, this.height - 20);
+    }
+
+    private void drawOverlay(GuiGraphics graphics, String text, int x, int y) {
         int padding = 4;
-        int controlsX = 20;
-        int controlsY = this.height - 20;
-        graphics.fill(controlsX - padding, controlsY - padding,
-                controlsX + this.font.width(controls) + padding, controlsY + this.font.lineHeight + padding,
+        graphics.fill(x - padding, y - padding,
+                x + this.font.width(text) + padding, y + this.font.lineHeight + padding,
                 0x80000000);
-        graphics.drawString(this.font, controls, controlsX, controlsY, 0xFFFFFFFF);
+        graphics.drawString(this.font, text, x, y, 0xFFFFFFFF);
     }
 
     private void renderPlayers(GuiGraphics graphics, Matrix4f mv, Matrix4f proj, float partialTick) {
@@ -207,7 +212,7 @@ public class LodViewerScreen extends Screen {
 
             // Clip before dividing so players behind the camera cannot appear on the map.
             if (position.w <= 0f || Math.abs(position.x) > position.w
-                    || Math.abs(position.y) > position.w || Math.abs(position.z) > position.w) continue;
+                || Math.abs(position.y) > position.w || Math.abs(position.z) > position.w) continue;
 
             int x = Math.round((position.x / position.w + 1f) * width * 0.5f) - PLAYER_MARKER_SIZE / 2;
             int y = Math.round((1f - position.y / position.w) * height * 0.5f) - PLAYER_MARKER_SIZE / 2;
