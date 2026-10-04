@@ -99,18 +99,6 @@ public class ChunkLodDatabase implements AutoCloseable {
                         PRIMARY KEY (x, z, dimension, lod)
                     )
                     """);
-
-            // Create an index for faster lookups by dimension and LOD
-            stmt.execute("""
-                    CREATE INDEX IF NOT EXISTS idx_dimension_lod
-                    ON chunk_lod(dimension, lod)
-                    """);
-
-            // Create an index for spatial queries
-            stmt.execute("""
-                    CREATE INDEX IF NOT EXISTS idx_spatial
-                    ON chunk_lod(x, z)
-                    """);
         }
     }
 
