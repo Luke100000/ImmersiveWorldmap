@@ -5,6 +5,7 @@ public class Camera3D {
     private static final float SMOOTH_HALF_LIFE = 0.025f;
     private static final float DECAY_HALF_LIFE = 0.05f;
     private static final float VELOCITY_EPSILON = 0.001f;
+    private static final float REFERENCE_FPS = 60f;
 
     private static final float ZOOM_MIN = 96f;
     private static final float ZOOM_MAX = 10000f;
@@ -20,7 +21,7 @@ public class Camera3D {
     // rendered (lerped) state
     private float smoothX, smoothY, smoothZ, smoothYaw, smoothPitch, smoothZoom;
 
-    // carry-on velocities (target-units per frame, decayed each tick)
+    // Carry-on velocities measured per frame.
     private float velX, velZ, velYaw, velPitch;
 
     private boolean isDraggingRotation = false;
@@ -28,7 +29,7 @@ public class Camera3D {
     private int lastMouseX, lastMouseY;
 
     private static final float ROT_SENSITIVITY = 0.4f; // px -> degrees
-    private static final float WASD_SPEED = 0.01f; // fraction of zoom per tick
+    private static final float WASD_SPEED = 0.01f; // fraction of zoom
     private static final float KEY_ROTATION_SPEED = 150f; // degrees per second
 
     private static final int MOUSE_PAN = 0;
@@ -63,8 +64,9 @@ public class Camera3D {
         dt = Math.min(dt, 0.1f);
         lastTickNanos = now;
 
-        float decay = (dt == 0f) ? 0f : (float) Math.pow(0.5, dt / DECAY_HALF_LIFE);
+        float decay = (float) Math.pow(0.5, dt / DECAY_HALF_LIFE);
         float lerp = (dt == 0f) ? 0f : 1f - (float) Math.pow(0.5, dt / SMOOTH_HALF_LIFE);
+        float inertiaStep = dt == 0f ? 0f : (float) (REFERENCE_FPS * DECAY_HALF_LIFE / Math.log(2) * (1 - decay));
 
         // WASD pan relative to camera yaw. Matches the view basis:
         // screen-forward = (sin yaw, cos yaw), screen-right = f x up = (-cos yaw, sin yaw).
@@ -74,7 +76,7 @@ public class Camera3D {
             float fwdZ = (float) Math.cos(yr);
             float rigX = -(float) Math.cos(yr);
             float rigZ = (float) Math.sin(yr);
-            float speed = WASD_SPEED * smoothZoom;
+            float speed = WASD_SPEED * smoothZoom * REFERENCE_FPS * dt;
 
             if (keyW) {
                 targetX += fwdX * speed;
@@ -94,11 +96,11 @@ public class Camera3D {
             }
         }
 
-        targetX += velX;
-        targetZ += velZ;
+        targetX += velX * inertiaStep;
+        targetZ += velZ * inertiaStep;
         targetYaw += ((keyQ ? 1 : 0) - (keyE ? 1 : 0)) * KEY_ROTATION_SPEED * dt;
-        targetYaw += velYaw;
-        targetPitch += velPitch;
+        targetYaw += velYaw * inertiaStep;
+        targetPitch += velPitch * inertiaStep;
 
         targetPitch = Math.clamp(targetPitch, PITCH_MIN, PITCH_MAX);
         targetZoom = Math.clamp(targetZoom, ZOOM_MIN, ZOOM_MAX);

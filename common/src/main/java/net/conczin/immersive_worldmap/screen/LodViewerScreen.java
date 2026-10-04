@@ -3,7 +3,6 @@ package net.conczin.immersive_worldmap.screen;
 import com.mojang.blaze3d.systems.RenderSystem;
 import net.conczin.immersive_worldmap.ImmersiveWorldmap;
 import net.conczin.immersive_worldmap.lod.ChunkLodProcessor;
-import net.conczin.immersive_worldmap.renderer.LodChunkMesh;
 import net.conczin.immersive_worldmap.renderer.LodChunkMeshManager;
 import net.conczin.immersive_worldmap.renderer.LodChunkPageManager;
 import net.conczin.immersive_worldmap.renderer.LodChunkVisibilitySelector;
@@ -23,7 +22,6 @@ import org.joml.Vector4f;
 import org.lwjgl.opengl.GL11;
 
 import java.util.HashSet;
-import java.util.List;
 import java.util.Set;
 
 public class LodViewerScreen extends Screen {
@@ -167,8 +165,10 @@ public class LodViewerScreen extends Screen {
         float zoom = camera.getSmoothZoom() * (1f + 0.3f * openingBonus);
         Matrix4f mv, proj;
         {
-            float yaw = (float) Math.toRadians(camera.getSmoothYaw() + 10f * openingBonus);
-            float pitch = (float) Math.toRadians(camera.getSmoothPitch() - 10f * openingBonus);
+            float yawDegrees = camera.getSmoothYaw() + 10f * openingBonus;
+            float pitchDegrees = camera.getSmoothPitch() - 10f * openingBonus;
+            float yaw = (float) Math.toRadians(yawDegrees);
+            float pitch = (float) Math.toRadians(pitchDegrees);
             float targetX = camera.getSmoothTargetX();
             float targetY = camera.getSmoothTargetY();
             float targetZ = camera.getSmoothTargetZ();
@@ -180,10 +180,9 @@ public class LodViewerScreen extends Screen {
             mv = new Matrix4f().lookAt(eyeX, eyeY, eyeZ, targetX, targetY, targetZ, 0, 1, 0);
             proj = new Matrix4f().setPerspective((float) Math.toRadians(60.0), (float) width / height, zoom * 0.1f, zoom * 10f);
 
-            LodChunkVisibilitySelector.get().update(mv, proj, dimension, targetX, targetZ, zoom);
+            LodChunkVisibilitySelector.get().update(dimension, targetX, targetY, targetZ,
+                    yawDegrees, pitchDegrees, zoom, (float) width / height);
         }
-
-        List<LodChunkMesh> visible = LodChunkVisibilitySelector.get().visibleChunks();
 
         graphics.flush();
         RenderSystem.depthMask(true);
@@ -192,7 +191,7 @@ public class LodViewerScreen extends Screen {
         RenderSystem.disableBlend();
         RenderSystem.enableCull();
 
-        LodChunkPageManager.INSTANCE.draw(visible, mv, proj,
+        LodChunkPageManager.INSTANCE.draw(LodChunkVisibilitySelector.get().selection(), mv, proj,
                 camera.getSmoothTargetX(), camera.getSmoothTargetZ(),
                 LodChunkVisibilitySelector.renderRadius(zoom));
 

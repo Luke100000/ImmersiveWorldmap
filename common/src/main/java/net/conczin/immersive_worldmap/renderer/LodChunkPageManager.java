@@ -77,10 +77,12 @@ public final class LodChunkPageManager {
         }
     }
 
-    public void draw(List<LodChunkMesh> visible, Matrix4f mv, Matrix4f proj, float focusX, float focusZ, float radius) {
+    public void draw(LodChunkVisibilitySelector.Selection selection, Matrix4f mv, Matrix4f proj, float focusX, float focusZ, float radius) {
         frame++;
         uploadReady();
 
+        // Residency changes during uploads and eviction, so choose the LOD cut on the render thread.
+        List<LodChunkMesh> visible = selection.select(this::isDrawable);
         Map<Page, List<LodChunkMesh>> batches = new HashMap<>();
         for (LodChunkMesh chunk : visible) {
             if (chunk.pageGeneration() != generation) continue;
@@ -109,6 +111,14 @@ public final class LodChunkPageManager {
             }
         }
         trim();
+    }
+
+    private boolean isDrawable(LodChunkMesh chunk) {
+        if (chunk.pageGeneration() != generation) return false;
+        Page page = pages.get(key(chunk));
+        if (page != null && page.installedChunks[page.slot(chunk)] == chunk) return true;
+        byte[] geometry = chunk.geometry();
+        return chunk.isLoaded() && geometry != null && geometry.length == 0;
     }
 
     public synchronized void clear() {
