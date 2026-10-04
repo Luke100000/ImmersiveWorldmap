@@ -47,6 +47,12 @@ public class ChunkLodProcessor {
         return executor == null ? 0 : executor.getActiveCount() + executor.getQueue().size();
     }
 
+    public static void clearCache() {
+        synchronized (LOD_LOCK) {
+            LOD_CACHE.clear();
+        }
+    }
+
     public static void processChunk(LevelChunk chunk, long packetHash) {
         EXECUTOR.submit(0, () -> {
             processChunkSync(chunk, packetHash);

@@ -1,5 +1,6 @@
 package net.conczin.immersive_worldmap.database;
 
+import net.conczin.immersive_worldmap.ImmersiveWorldmap;
 import net.conczin.immersive_worldmap.lod.LodChunkData;
 import net.conczin.immersive_worldmap.util.CompressionUtil;
 
@@ -262,27 +263,32 @@ public class ChunkLodDatabase implements AutoCloseable {
     }
 
     /**
-     * Clears all chunks for a specific dimension.
+     * Clears all chunks and lods for a specific dimension.
      *
      * @param dimension the dimension identifier
-     * @throws SQLException if a database access error occurs
      */
-    public void clearDimension(String dimension) throws SQLException {
-        Connection connection = getConnection();
-        String sql = "DELETE FROM chunk_lod WHERE dimension = ?";
-
-        PreparedStatement pstmt = prepare(connection, sql);
-        pstmt.setString(1, dimension);
-        pstmt.executeUpdate();
+    public void clearDimension(String dimension) {
+        clear("DELETE FROM chunk_lod WHERE dimension = ?", dimension);
     }
 
-    public void clearGeneratedLods(String dimension) throws SQLException {
-        Connection connection = getConnection();
-        String sql = "DELETE FROM chunk_lod WHERE dimension = ? AND lod > 0";
+    /**
+     * Clears all lods for a specific dimension.
+     *
+     * @param dimension the dimension identifier
+     */
+    public void clearGeneratedLods(String dimension) {
+        clear("DELETE FROM chunk_lod WHERE dimension = ? AND lod > 0", dimension);
+    }
 
-        PreparedStatement pstmt = prepare(connection, sql);
-        pstmt.setString(1, dimension);
-        pstmt.executeUpdate();
+    private void clear(String sql, String dimension) {
+        try {
+            Connection connection = getConnection();
+            PreparedStatement pstmt = prepare(connection, sql);
+            pstmt.setString(1, dimension);
+            pstmt.executeUpdate();
+        } catch (SQLException e) {
+            ImmersiveWorldmap.LOGGER.error("Failed to clear LOD data for {}: {}", dimension, sql, e);
+        }
     }
 
     @Override

@@ -2,6 +2,7 @@ package net.conczin.immersive_worldmap.screen;
 
 import com.mojang.blaze3d.systems.RenderSystem;
 import net.conczin.immersive_worldmap.ImmersiveWorldmap;
+import net.conczin.immersive_worldmap.database.DatabaseManager;
 import net.conczin.immersive_worldmap.lod.ChunkLodProcessor;
 import net.conczin.immersive_worldmap.renderer.LodChunkMeshManager;
 import net.conczin.immersive_worldmap.renderer.LodChunkPageManager;
@@ -19,6 +20,7 @@ import net.minecraft.world.level.LightLayer;
 import net.minecraft.world.phys.Vec3;
 import org.joml.Matrix4f;
 import org.joml.Vector4f;
+import org.lwjgl.glfw.GLFW;
 import org.lwjgl.opengl.GL11;
 
 import java.util.HashSet;
@@ -71,6 +73,18 @@ public class LodViewerScreen extends Screen {
         LodChunkMeshManager.INSTANCE.clear();
     }
 
+    private void clearDimensionLods() {
+        DatabaseManager.getInstance().clearDimension(dimension);
+        ChunkLodProcessor.clearCache();
+        clearMeshes();
+    }
+
+    private void clearGeneratedLods() {
+        DatabaseManager.getInstance().clearGeneratedLods(dimension);
+        ChunkLodProcessor.clearCache();
+        clearMeshes();
+    }
+
     @Override
     public boolean mouseClicked(double mouseX, double mouseY, int button) {
         if (super.mouseClicked(mouseX, mouseY, button)) {
@@ -108,6 +122,18 @@ public class LodViewerScreen extends Screen {
         if (ImmersiveWorldmap.MAP_VIEWER_KEY.matches(keyCode, scanCode)) {
             onClose();
             return true;
+        }
+
+        // Debug-only destructive actions, gated behind the F3 overlay.
+        if (minecraft.getDebugOverlay().showDebugScreen()) {
+            if (keyCode == GLFW.GLFW_KEY_F6) {
+                clearDimensionLods();
+                return true;
+            }
+            if (keyCode == GLFW.GLFW_KEY_F7) {
+                clearGeneratedLods();
+                return true;
+            }
         }
 
         if (keyCode == KEY_TAB) {
@@ -204,6 +230,8 @@ public class LodViewerScreen extends Screen {
         if (minecraft.getDebugOverlay().showDebugScreen()) {
             int tasks = ChunkLodProcessor.getPendingTaskCount() + LodChunkPageManager.INSTANCE.getPendingTaskCount();
             drawOverlay(graphics, "Tasks: " + tasks, 20, 20);
+            drawOverlay(graphics, "F6: clear dimension LODs (database + cache)", 20, 40);
+            drawOverlay(graphics, "F7: clear generated LODs (LOD > 0)", 20, 60);
         }
 
         String closeKey = ImmersiveWorldmap.MAP_VIEWER_KEY.getTranslatedKeyMessage().getString();
