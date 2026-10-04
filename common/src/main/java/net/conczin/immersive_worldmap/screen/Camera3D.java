@@ -13,7 +13,9 @@ public class Camera3D {
 
     // desired state
     private float targetX, targetY, targetZ;
-    private float targetYaw = 0f, targetPitch = -45f, targetZoom = 100f;
+    private float targetYaw = 0f;
+    private float targetPitch = -45f;
+    private float targetZoom = 100f;
 
     // rendered (lerped) state
     private float smoothX, smoothY, smoothZ, smoothYaw, smoothPitch, smoothZoom;
@@ -26,8 +28,8 @@ public class Camera3D {
     private int lastMouseX, lastMouseY;
 
     private static final float ROT_SENSITIVITY = 0.4f;   // px -> degrees
-    private static final float WASD_SPEED = 0.015f; // fraction of zoom per tick
-    private static final float KEY_ROTATION_SPEED = 90f; // degrees per second
+    private static final float WASD_SPEED = 0.01f; // fraction of zoom per tick
+    private static final float KEY_ROTATION_SPEED = 150f; // degrees per second
 
     private static final int MOUSE_PAN = 0;
     private static final int MOUSE_ROTATE = 1;

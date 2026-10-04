@@ -60,7 +60,7 @@ public class LodViewerScreen extends Screen {
                 (float) minecraft.player.getZ());
         SharedSettings.caveView = minecraft.level.getBrightness(LightLayer.SKY, minecraft.player.blockPosition()) == 0;
         SharedSettings.caveViewBaselineY = (int) Math.floor(minecraft.player.getY()) - minecraft.level.getMinBuildHeight();
-        camera.setZoom(SharedSettings.caveView ? 200f : 500f);
+        camera.setZoom(SharedSettings.caveView ? 200f : 300f);
     }
 
     private void clearMeshes() {
@@ -182,8 +182,10 @@ public class LodViewerScreen extends Screen {
 
         renderPlayers(graphics, mv, proj, partialTick);
 
-        int tasks = ChunkLodProcessor.getPendingTaskCount() + LodChunkPageManager.INSTANCE.getPendingTaskCount();
-        drawOverlay(graphics, "Tasks: " + tasks, 20, 20);
+        if (minecraft.getDebugOverlay().showDebugScreen()) {
+            int tasks = ChunkLodProcessor.getPendingTaskCount() + LodChunkPageManager.INSTANCE.getPendingTaskCount();
+            drawOverlay(graphics, "Tasks: " + tasks, 20, 20);
+        }
 
         String closeKey = ImmersiveWorldmap.MAP_VIEWER_KEY.getTranslatedKeyMessage().getString();
         String controls = "LMB: pan   RMB: orbit   Wheel: zoom   WASD/Arrows: pan   Q/E: rotate   Tab: cave view   " + closeKey + ": close";
