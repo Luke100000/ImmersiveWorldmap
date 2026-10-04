@@ -13,7 +13,7 @@ public class Camera3D {
 
     // desired state
     private float targetX, targetY, targetZ;
-    private float targetYaw = 0f;
+    private float targetYaw = 45f;
     private float targetPitch = -45f;
     private float targetZoom = 100f;
 
@@ -27,7 +27,7 @@ public class Camera3D {
     private boolean isDraggingPan = false;
     private int lastMouseX, lastMouseY;
 
-    private static final float ROT_SENSITIVITY = 0.4f;   // px -> degrees
+    private static final float ROT_SENSITIVITY = 0.4f; // px -> degrees
     private static final float WASD_SPEED = 0.01f; // fraction of zoom per tick
     private static final float KEY_ROTATION_SPEED = 150f; // degrees per second
 
@@ -122,20 +122,12 @@ public class Camera3D {
     }
 
     public boolean mouseClicked(double mouseX, double mouseY, int button) {
-        if (button == MOUSE_ROTATE) {
-            isDraggingRotation = true;
-            isDraggingPan = false;
-            lastMouseX = (int) mouseX;
-            lastMouseY = (int) mouseY;
-            return true;
-        } else if (button == MOUSE_PAN) {
-            isDraggingPan = true;
-            isDraggingRotation = false;
-            lastMouseX = (int) mouseX;
-            lastMouseY = (int) mouseY;
-            return true;
-        }
-        return false;
+        if (button != MOUSE_ROTATE && button != MOUSE_PAN) return false;
+        isDraggingRotation = button == MOUSE_ROTATE;
+        isDraggingPan = button == MOUSE_PAN;
+        lastMouseX = (int) mouseX;
+        lastMouseY = (int) mouseY;
+        return true;
     }
 
     public boolean mouseReleased(int button) {
@@ -180,32 +172,17 @@ public class Camera3D {
 
     public boolean keyPressed(int keyCode) {
         switch (keyCode) {
-            case KEY_W, KEY_UP -> {
-                keyW = true;
-                return true;
-            }
-            case KEY_S, KEY_DOWN -> {
-                keyS = true;
-                return true;
-            }
-            case KEY_A, KEY_LEFT -> {
-                keyA = true;
-                return true;
-            }
-            case KEY_D, KEY_RIGHT -> {
-                keyD = true;
-                return true;
-            }
-            case KEY_Q -> {
-                keyQ = true;
-                return true;
-            }
-            case KEY_E -> {
-                keyE = true;
-                return true;
+            case KEY_W, KEY_UP -> keyW = true;
+            case KEY_S, KEY_DOWN -> keyS = true;
+            case KEY_A, KEY_LEFT -> keyA = true;
+            case KEY_D, KEY_RIGHT -> keyD = true;
+            case KEY_Q -> keyQ = true;
+            case KEY_E -> keyE = true;
+            default -> {
+                return false;
             }
         }
-        return false;
+        return true;
     }
 
     public boolean keyReleased(int keyCode) {
@@ -270,6 +247,12 @@ public class Camera3D {
 
     public void setZoom(float zoom) {
         targetZoom = smoothZoom = Math.clamp(zoom, ZOOM_MIN, ZOOM_MAX);
+    }
+
+    public void setRotation(float yaw, float pitch) {
+        targetYaw = smoothYaw = yaw;
+        targetPitch = smoothPitch = Math.clamp(pitch, PITCH_MIN, PITCH_MAX);
+        velYaw = velPitch = 0f;
     }
 
     public void applyPan(float dx, float dy, int screenW, int screenH) {

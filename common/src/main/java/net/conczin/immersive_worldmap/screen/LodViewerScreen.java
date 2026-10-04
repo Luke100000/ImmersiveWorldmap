@@ -30,10 +30,12 @@ public class LodViewerScreen extends Screen {
     private static final int KEY_ESCAPE = 256;
     private static final int KEY_TAB = 258;
     private static final int PLAYER_MARKER_SIZE = 16;
+    private static final float OPENING_DURATION_SECONDS = 0.6f;
 
     private final Minecraft minecraft;
     private String dimension;
     private final Camera3D camera = new Camera3D();
+    private long openingStartNanos;
 
     private final Set<Integer> heldKeys = new HashSet<>();
 
@@ -52,7 +54,9 @@ public class LodViewerScreen extends Screen {
     }
 
     private void loadState() {
-        if (minecraft.player == null || minecraft.level == null) return;
+        if (minecraft.player == null || minecraft.level == null) {
+            return;
+        }
 
         dimension = minecraft.level.dimension().location().toString();
         camera.setTarget((float) minecraft.player.getX(),
@@ -60,7 +64,8 @@ public class LodViewerScreen extends Screen {
                 (float) minecraft.player.getZ());
         SharedSettings.caveView = minecraft.level.getBrightness(LightLayer.SKY, minecraft.player.blockPosition()) == 0;
         SharedSettings.caveViewBaselineY = (int) Math.floor(minecraft.player.getY()) - minecraft.level.getMinBuildHeight();
-        camera.setZoom(SharedSettings.caveView ? 200f : 300f);
+        camera.setZoom(SharedSettings.caveView ? 150f : 225f);
+        camera.setRotation(45f, SharedSettings.caveView ? -60 : -45f);
     }
 
     private void clearMeshes() {
@@ -70,25 +75,33 @@ public class LodViewerScreen extends Screen {
 
     @Override
     public boolean mouseClicked(double mouseX, double mouseY, int button) {
-        if (super.mouseClicked(mouseX, mouseY, button)) return true;
+        if (super.mouseClicked(mouseX, mouseY, button)) {
+            return true;
+        }
         return camera.mouseClicked(mouseX, mouseY, button);
     }
 
     @Override
     public boolean mouseReleased(double mouseX, double mouseY, int button) {
-        if (camera.mouseReleased(button)) return true;
+        if (camera.mouseReleased(button)) {
+            return true;
+        }
         return super.mouseReleased(mouseX, mouseY, button);
     }
 
     @Override
     public boolean mouseDragged(double mouseX, double mouseY, int button, double dragX, double dragY) {
-        if (camera.mouseDragged(mouseX, mouseY, button, width, height)) return true;
+        if (camera.mouseDragged(mouseX, mouseY, button, width, height)) {
+            return true;
+        }
         return super.mouseDragged(mouseX, mouseY, button, dragX, dragY);
     }
 
     @Override
     public boolean mouseScrolled(double mouseX, double mouseY, double scrollX, double scrollY) {
-        if (camera.mouseScrolled(scrollY)) return true;
+        if (camera.mouseScrolled(scrollY)) {
+            return true;
+        }
         return super.mouseScrolled(mouseX, mouseY, scrollX, scrollY);
     }
 
@@ -141,14 +154,21 @@ public class LodViewerScreen extends Screen {
     public void render(GuiGraphics graphics, int mouseX, int mouseY, float partialTick) {
         super.render(graphics, mouseX, mouseY, partialTick);
 
+        long now = System.nanoTime();
+        if (openingStartNanos == 0) {
+            openingStartNanos = now;
+        }
+        float openingProgress = Math.min((now - openingStartNanos) / (OPENING_DURATION_SECONDS * 1_000_000_000f), 1f);
+        float openingBonus = 1f - openingProgress * openingProgress * (3f - 2f * openingProgress);
+
         camera.tick();
         LodChunkMeshManager.tick();
 
+        float zoom = camera.getSmoothZoom() * (1f + 0.3f * openingBonus);
         Matrix4f mv, proj;
         {
-            float yaw = (float) Math.toRadians(camera.getSmoothYaw());
-            float pitch = (float) Math.toRadians(camera.getSmoothPitch());
-            float zoom = camera.getSmoothZoom();
+            float yaw = (float) Math.toRadians(camera.getSmoothYaw() + 10f * openingBonus);
+            float pitch = (float) Math.toRadians(camera.getSmoothPitch() - 10f * openingBonus);
             float targetX = camera.getSmoothTargetX();
             float targetY = camera.getSmoothTargetY();
             float targetZ = camera.getSmoothTargetZ();
@@ -174,7 +194,7 @@ public class LodViewerScreen extends Screen {
 
         LodChunkPageManager.INSTANCE.draw(visible, mv, proj,
                 camera.getSmoothTargetX(), camera.getSmoothTargetZ(),
-                LodChunkVisibilitySelector.renderRadius(camera.getSmoothZoom()));
+                LodChunkVisibilitySelector.renderRadius(zoom));
 
         RenderSystem.disableCull();
         RenderSystem.disableDepthTest();
@@ -190,6 +210,11 @@ public class LodViewerScreen extends Screen {
         String closeKey = ImmersiveWorldmap.MAP_VIEWER_KEY.getTranslatedKeyMessage().getString();
         String controls = "LMB: pan   RMB: orbit   Wheel: zoom   WASD/Arrows: pan   Q/E: rotate   Tab: cave view   " + closeKey + ": close";
         drawOverlay(graphics, controls, 20, this.height - 20);
+
+        int fadeAlpha = Math.round(openingBonus * 255f);
+        if (fadeAlpha > 0) {
+            graphics.fill(0, 0, this.width, this.height, fadeAlpha << 24);
+        }
     }
 
     private void drawOverlay(GuiGraphics graphics, String text, int x, int y) {
@@ -201,7 +226,9 @@ public class LodViewerScreen extends Screen {
     }
 
     private void renderPlayers(GuiGraphics graphics, Matrix4f mv, Matrix4f proj, float partialTick) {
-        if (minecraft.level == null || !minecraft.level.dimension().location().toString().equals(dimension)) return;
+        if (minecraft.level == null || !minecraft.level.dimension().location().toString().equals(dimension)) {
+            return;
+        }
 
         Matrix4f viewProjection = new Matrix4f(proj).mul(mv);
         Vector4f position = new Vector4f();
@@ -214,7 +241,9 @@ public class LodViewerScreen extends Screen {
 
             // Clip before dividing so players behind the camera cannot appear on the map.
             if (position.w <= 0f || Math.abs(position.x) > position.w
-                || Math.abs(position.y) > position.w || Math.abs(position.z) > position.w) continue;
+                || Math.abs(position.y) > position.w || Math.abs(position.z) > position.w) {
+                continue;
+            }
 
             int x = Math.round((position.x / position.w + 1f) * width * 0.5f) - PLAYER_MARKER_SIZE / 2;
             int y = Math.round((1f - position.y / position.w) * height * 0.5f) - PLAYER_MARKER_SIZE / 2;
