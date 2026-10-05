@@ -1,5 +1,6 @@
 package net.conczin.immersive_worldmap.screen;
 
+import net.minecraft.util.Mth;
 
 public class Camera3D {
     private static final float SMOOTH_HALF_LIFE = 0.025f;
@@ -254,7 +255,7 @@ public class Camera3D {
     }
 
     public void setRotation(float yaw, float pitch) {
-        targetYaw = smoothYaw = yaw;
+        targetYaw = smoothYaw + Mth.wrapDegrees(yaw - smoothYaw);
         targetPitch = smoothPitch = Math.clamp(pitch, PITCH_MIN, PITCH_MAX);
         velYaw = velPitch = 0f;
     }

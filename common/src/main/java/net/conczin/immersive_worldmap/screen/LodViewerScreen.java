@@ -1,6 +1,7 @@
 package net.conczin.immersive_worldmap.screen;
 
 import com.mojang.blaze3d.systems.RenderSystem;
+import com.mojang.math.Axis;
 import net.conczin.immersive_worldmap.ImmersiveWorldmap;
 import net.conczin.immersive_worldmap.database.DatabaseManager;
 import net.conczin.immersive_worldmap.lod.ChunkLodProcessor;
@@ -16,6 +17,7 @@ import net.minecraft.client.player.AbstractClientPlayer;
 import net.minecraft.client.renderer.entity.LivingEntityRenderer;
 import net.minecraft.core.BlockPos;
 import net.minecraft.network.chat.Component;
+import net.minecraft.resources.ResourceLocation;
 import net.minecraft.util.FormattedCharSequence;
 import net.minecraft.world.entity.player.PlayerModelPart;
 import net.minecraft.world.level.LightLayer;
@@ -29,12 +31,14 @@ import java.util.HashSet;
 import java.util.Set;
 
 public class LodViewerScreen extends Screen {
+    private static final ResourceLocation PLAYER_FACING_ARROW = ImmersiveWorldmap.locate("textures/gui/player_facing_arrow.png");
     private static final int KEY_ESCAPE = 256;
-    private static final int KEY_TAB = 258;
     private static final int PLAYER_MARKER_SIZE = 16;
     private static final int OVERLAY_PADDING = 4;
     private static final int MAX_CAVE_AIR_BLOCKS = 64;
+    private static final float DEFAULT_YAW = 135f;
     private static final float OPENING_DURATION_SECONDS = 0.6f;
+    private static boolean playerFacingYaw;
 
     private final Minecraft minecraft;
     private String dimension;
@@ -80,7 +84,7 @@ public class LodViewerScreen extends Screen {
         SharedSettings.caveViewWallHeight = airBlocks;
 
         camera.setZoom(SharedSettings.caveView ? 150f : 225f);
-        camera.setRotation(135f, SharedSettings.caveView ? -60 : -45f);
+        camera.setRotation(playerFacingYaw ? -minecraft.player.getYRot() : DEFAULT_YAW, SharedSettings.caveView ? -60 : -45f);
     }
 
     private void clearMeshes() {
@@ -158,10 +162,18 @@ public class LodViewerScreen extends Screen {
             }
         }
 
-        if (keyCode == KEY_TAB) {
+        if (keyCode == GLFW.GLFW_KEY_C) {
             if (heldKeys.add(keyCode)) {
                 SharedSettings.caveView = !SharedSettings.caveView;
                 clearMeshes();
+            }
+            return true;
+        }
+
+        if (keyCode == GLFW.GLFW_KEY_SPACE) {
+            if (heldKeys.add(keyCode)) {
+                playerFacingYaw = !playerFacingYaw;
+                camera.setRotation(playerFacingYaw ? -minecraft.player.getYRot() : DEFAULT_YAW, camera.getSmoothPitch());
             }
             return true;
         }
@@ -262,6 +274,7 @@ public class LodViewerScreen extends Screen {
                 .append("   ").append(Component.translatable("screen.immersive_worldmap.controls.zoom"))
                 .append("   ").append(Component.translatable("screen.immersive_worldmap.controls.pan_keys"))
                 .append("   ").append(Component.translatable("screen.immersive_worldmap.controls.rotate"))
+                .append("   ").append(Component.translatable("screen.immersive_worldmap.controls.align_view"))
                 .append("   ").append(Component.translatable("screen.immersive_worldmap.controls.cave_view"))
                 .append("   ").append(Component.translatable("screen.immersive_worldmap.controls.close",
                         ImmersiveWorldmap.MAP_VIEWER_KEY.getTranslatedKeyMessage()));
@@ -302,6 +315,7 @@ public class LodViewerScreen extends Screen {
 
         Matrix4f viewProjection = new Matrix4f(proj).mul(mv);
         Vector4f position = new Vector4f();
+        Vector4f facing = new Vector4f();
         for (AbstractClientPlayer player : minecraft.level.players()) {
             float partialTick = minecraft.getTimer().getGameTimeDeltaPartialTick(!minecraft.level.tickRateManager().isEntityFrozen(player));
             Vec3 worldPosition = player.getPosition(partialTick);
@@ -326,10 +340,33 @@ public class LodViewerScreen extends Screen {
                 RenderSystem.disableDepthTest();
                 PlayerFaceRenderer.draw(graphics, player.getSkin().texture(), 0, 0, PLAYER_MARKER_SIZE,
                         player.isModelPartShown(PlayerModelPart.HAT), LivingEntityRenderer.isEntityUpsideDown(player));
+
+                // Projected pointing arrow thingy
+                float playerYaw = (float) Math.toRadians(player.getViewYRot(partialTick));
+                facing.set(-(float) Math.sin(playerYaw), 0f, (float) Math.cos(playerYaw), 0f);
+                viewProjection.transform(facing);
+                float directionX = (facing.x * position.w - position.x * facing.w) * width;
+                float directionY = -(facing.y * position.w - position.y * facing.w) * height;
+                drawPlayerFacingArrow(graphics, directionX, directionY);
             } finally {
                 graphics.pose().popPose();
             }
         }
+    }
+
+    private void drawPlayerFacingArrow(GuiGraphics graphics, float directionX, float directionY) {
+        float length = (float) Math.hypot(directionX, directionY);
+        if (length == 0f) return;
+        directionX /= length;
+        directionY /= length;
+
+        float center = PLAYER_MARKER_SIZE / 2f;
+        float offset = center + 7f;
+        graphics.pose().pushPose();
+        graphics.pose().translate(center + directionX * offset, center + directionY * offset, 0f);
+        graphics.pose().mulPose(Axis.ZP.rotation((float) Math.atan2(directionX, -directionY)));
+        graphics.blit(PLAYER_FACING_ARROW, -4, -3, 0f, 0f, 9, 6, 9, 6);
+        graphics.pose().popPose();
     }
 
     @Override
