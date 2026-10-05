@@ -6,4 +6,7 @@ public final class SharedSettings {
 
     // Slice baseline height
     public static volatile int caveViewBaselineY = 0;
+
+    // Consecutive air blocks above the player's head
+    public static volatile int caveViewWallHeight = 0;
 }

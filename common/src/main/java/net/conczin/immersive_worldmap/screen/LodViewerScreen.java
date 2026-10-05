@@ -14,6 +14,7 @@ import net.minecraft.client.gui.components.PlayerFaceRenderer;
 import net.minecraft.client.gui.screens.Screen;
 import net.minecraft.client.player.AbstractClientPlayer;
 import net.minecraft.client.renderer.entity.LivingEntityRenderer;
+import net.minecraft.core.BlockPos;
 import net.minecraft.network.chat.Component;
 import net.minecraft.util.FormattedCharSequence;
 import net.minecraft.world.entity.player.PlayerModelPart;
@@ -32,6 +33,7 @@ public class LodViewerScreen extends Screen {
     private static final int KEY_TAB = 258;
     private static final int PLAYER_MARKER_SIZE = 16;
     private static final int OVERLAY_PADDING = 4;
+    private static final int MAX_CAVE_AIR_BLOCKS = 64;
     private static final float OPENING_DURATION_SECONDS = 0.6f;
 
     private final Minecraft minecraft;
@@ -48,9 +50,10 @@ public class LodViewerScreen extends Screen {
 
         boolean previousCaveView = SharedSettings.caveView;
         int previousBaselineY = SharedSettings.caveViewBaselineY;
+        int previousWallHeight = SharedSettings.caveViewWallHeight;
         loadState();
         if (previousCaveView != SharedSettings.caveView
-            || (SharedSettings.caveView && previousBaselineY != SharedSettings.caveViewBaselineY)) {
+            || (SharedSettings.caveView && (previousBaselineY != SharedSettings.caveViewBaselineY || previousWallHeight != SharedSettings.caveViewWallHeight))) {
             clearMeshes();
         }
     }
@@ -66,6 +69,16 @@ public class LodViewerScreen extends Screen {
                 (float) minecraft.player.getZ());
         SharedSettings.caveView = minecraft.level.getBrightness(LightLayer.SKY, minecraft.player.blockPosition()) == 0;
         SharedSettings.caveViewBaselineY = (int) Math.floor(minecraft.player.getY()) - minecraft.level.getMinBuildHeight();
+
+        BlockPos.MutableBlockPos aboveHead = new BlockPos.MutableBlockPos(minecraft.player.getBlockX(),
+                (int) Math.ceil(minecraft.player.getBoundingBox().maxY), minecraft.player.getBlockZ());
+        int airBlocks = 0;
+        while (airBlocks < MAX_CAVE_AIR_BLOCKS && !minecraft.level.isOutsideBuildHeight(aboveHead) && minecraft.level.getBlockState(aboveHead).isAir()) {
+            airBlocks++;
+            aboveHead.move(0, 1, 0);
+        }
+        SharedSettings.caveViewWallHeight = airBlocks;
+
         camera.setZoom(SharedSettings.caveView ? 150f : 225f);
         camera.setRotation(135f, SharedSettings.caveView ? -60 : -45f);
     }

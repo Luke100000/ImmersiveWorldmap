@@ -16,9 +16,6 @@ import java.util.concurrent.CompletableFuture;
 public class LodChunkMeshBuilder {
     private static final byte[] EMPTY = new byte[0];
 
-    // How many blocks of wall are kept above the cave view baseline.
-    private static final int CAVE_WALL_HEIGHT = 8;
-
     // Slack kept below the floor, so a sloping surface is never cut into
     private static final int FLOOR_BUFFER = 8;
 
@@ -63,9 +60,11 @@ public class LodChunkMeshBuilder {
         LodChunkData center = neighbors.center();
         if (center.empty()) return EMPTY;
 
-        // One LOD block covers 1 << lod world blocks, so the baseline has to be scaled down
+        // Scale both heights from world blocks to LOD blocks.
         int baseline = Math.clamp(Math.floorDiv(SharedSettings.caveViewBaselineY, 1 << lod), 0, Math.max(0, center.getHeight() - 1));
-        neighbors = neighbors.withSlice(SharedSettings.caveView ? new CaveSlice(neighbors, baseline) : null);
+        int limit = Math.clamp(Math.floorDiv(SharedSettings.caveViewBaselineY + SharedSettings.caveViewWallHeight, 1 << lod),
+                0, Math.max(0, center.getHeight() - 1));
+        neighbors = neighbors.withSlice(SharedSettings.caveView ? new CaveSlice(neighbors, baseline, limit) : null);
         CaveSlice slice = neighbors.slice();
 
         int floor = slice == null ? Math.max(0, getMinSurrounding(neighbors) - FLOOR_BUFFER) : 0;
@@ -370,8 +369,7 @@ public class LodChunkMeshBuilder {
         // Cut Y per column of the 9 chunks, indexed by chunkIndex(chunkX, chunkZ).
         private final int[] cut = new int[CHUNK_COUNT * COLUMNS_PER_CHUNK];
 
-        private CaveSlice(ChunkNeighborhood neighbors, int baseline) {
-            int limit = baseline + CAVE_WALL_HEIGHT - 1;
+        private CaveSlice(ChunkNeighborhood neighbors, int baseline, int limit) {
             for (int chunkX = -1; chunkX <= 1; chunkX++) {
                 for (int chunkZ = -1; chunkZ <= 1; chunkZ++) {
                     LodChunkData chunk = neighbors.getChunk(chunkX, chunkZ);
