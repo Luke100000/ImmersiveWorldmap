@@ -1,7 +1,7 @@
 # 0.1.0
 
-* Release
+* First release.
 
 # TODO
 
-* Optional server support (Fetch chunks from server directly? Make the database common sided?)
+* Explore optional server support for fetching chunks directly and sharing the map database.

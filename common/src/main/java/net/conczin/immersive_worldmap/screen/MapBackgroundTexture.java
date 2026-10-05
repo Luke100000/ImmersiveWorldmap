@@ -1,7 +1,6 @@
 package net.conczin.immersive_worldmap.screen;
 
 import com.mojang.blaze3d.platform.NativeImage;
-import net.conczin.immersive_worldmap.ImmersiveWorldmap;
 import net.minecraft.client.Minecraft;
 import net.minecraft.client.renderer.texture.DynamicTexture;
 import net.minecraft.resources.ResourceLocation;
@@ -17,9 +16,7 @@ public final class MapBackgroundTexture {
 
     public static ResourceLocation get() {
         if (location == null) {
-            long start = System.nanoTime();
             location = create();
-            ImmersiveWorldmap.LOGGER.info("[benchmark] createBackgroundTexture took {} ms", (System.nanoTime() - start) / 1_000_000.0);
         }
         return location;
     }

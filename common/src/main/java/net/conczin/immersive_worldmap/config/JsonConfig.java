@@ -6,9 +6,9 @@ import org.apache.logging.log4j.LogManager;
 import org.apache.logging.log4j.Logger;
 
 import java.io.File;
-import java.io.FileReader;
-import java.io.FileWriter;
 import java.io.IOException;
+import java.nio.charset.StandardCharsets;
+import java.nio.file.Files;
 
 public class JsonConfig {
     public static final Logger LOGGER = LogManager.getLogger();
@@ -29,10 +29,14 @@ public class JsonConfig {
     }
 
     public void save() {
-        try (FileWriter writer = new FileWriter(getConfigFile(name))) {
+        File file = getConfigFile(name);
+        try {
+            Files.createDirectories(file.toPath().getParent());
             version = getVersion();
             Gson gson = new GsonBuilder().setPrettyPrinting().create();
-            gson.toJson(this, writer);
+            try (var writer = Files.newBufferedWriter(file.toPath(), StandardCharsets.UTF_8)) {
+                gson.toJson(this, writer);
+            }
         } catch (IOException e) {
             LOGGER.error(e);
         }
@@ -41,16 +45,19 @@ public class JsonConfig {
     public static <T extends JsonConfig> T loadOrCreate(T defaultConfig, Class<T> jsonClass) {
         String name = defaultConfig.name;
         if (getConfigFile(name).exists()) {
-            try (FileReader reader = new FileReader(getConfigFile(name))) {
+            try {
                 Gson gson = new GsonBuilder().setPrettyPrinting().create();
-                T config = gson.fromJson(reader, jsonClass);
-                if (config.version != config.getVersion()) {
+                T config;
+                try (var reader = Files.newBufferedReader(getConfigFile(name).toPath(), StandardCharsets.UTF_8)) {
+                    config = gson.fromJson(reader, jsonClass);
+                }
+                if (config == null || config.version != config.getVersion()) {
                     config = defaultConfig;
                 }
                 config.save();
                 return config;
             } catch (Exception e) {
-                LOGGER.error("Failed to load config for '{}'! Default config is used for now. Delete the file to reset.", name);
+                LOGGER.error("Could not load config for '{}'. Using defaults. Delete the file to reset it.", name);
                 LOGGER.error(e);
                 return defaultConfig;
             }

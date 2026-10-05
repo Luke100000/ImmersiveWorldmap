@@ -23,6 +23,7 @@ neoForge {
     }
     runs {
         configureEach {
+            project.dependencies.add(additionalRuntimeClasspathConfiguration.name, "org.xerial:sqlite-jdbc:3.45.2.0")
             systemProperty('neoforge.enabledGameTestNamespaces', mod_id)
             ideName = "NeoForge ${it.name.capitalize()} (${project.path})" // Unify the run config names with fabric
         }
@@ -44,7 +45,11 @@ neoForge {
 }
 
 dependencies {
-    implementation("org.xerial:sqlite-jdbc:3.45.2.0")
-    implementation("org.lz4:lz4-java:1.8.0")
+    jarJar(implementation("org.xerial:sqlite-jdbc:3.45.2.0")) {
+        version {
+            strictly '[3.45.2.0,4.0)'
+            prefer '3.45.2.0'
+        }
+    }
     runtimeOnly "maven.modrinth:chunky:${chunky_neoforge_version}"
 }

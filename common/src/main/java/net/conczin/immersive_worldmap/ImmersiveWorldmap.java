@@ -8,11 +8,14 @@ import net.minecraft.client.KeyMapping;
 import net.minecraft.client.Minecraft;
 import net.minecraft.client.multiplayer.ServerData;
 import net.minecraft.client.server.IntegratedServer;
+import net.minecraft.world.level.storage.LevelResource;
 import org.lwjgl.glfw.GLFW;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
+import java.nio.charset.StandardCharsets;
 import java.nio.file.Path;
+import java.util.UUID;
 
 public class ImmersiveWorldmap {
     public static final String MOD_ID = "immersive_worldmap";
@@ -47,13 +50,15 @@ public class ImmersiveWorldmap {
         }
         LodChunkMeshManager.INSTANCE.clear();
 
-        String identifier = getWorldIdentifier();
-
         Path dbPath = Minecraft.getInstance().gameDirectory.toPath()
                 .resolve("immersiveworldmap")
-                .resolve(identifier + ".db");
+                .resolve(getWorldIdentifier());
         DatabaseManager.initialize(dbPath);
         ChunkLodProcessor.start();
+    }
+
+    private static String databaseName(String type, String identifier) {
+        return UUID.nameUUIDFromBytes((type + ":" + identifier).getBytes(StandardCharsets.UTF_8)) + ".db";
     }
 
     private static String getWorldIdentifier() {
@@ -61,11 +66,12 @@ public class ImmersiveWorldmap {
         IntegratedServer singleplayerServer = Minecraft.getInstance().getSingleplayerServer();
 
         if (currentServer != null) {
-            return currentServer.ip;
+            return databaseName("multiplayer", currentServer.ip);
         } else if (singleplayerServer != null) {
-            return singleplayerServer.getWorldData().getLevelName();
+            String folder = singleplayerServer.getWorldPath(LevelResource.ROOT).normalize().getFileName().toString();
+            return databaseName("singleplayer", folder);
         } else {
-            return "unknown_world";
+            return databaseName("unknown", "world");
         }
     }
 }

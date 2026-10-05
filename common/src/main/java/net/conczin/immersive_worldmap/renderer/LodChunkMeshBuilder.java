@@ -105,7 +105,7 @@ public class LodChunkMeshBuilder {
                         int g = color[1];
                         int r = color[2];
 
-                        // Add nosie
+                        // Add noise
                         int noise = positionNoise(
                                 (center.chunkX() * 16 + x) << lod,
                                 y << lod,

@@ -69,6 +69,13 @@ public class ChunkLodDatabase implements AutoCloseable {
         try (Statement statement = connection.createStatement()) {
             statement.execute("PRAGMA busy_timeout=5000");
             statement.execute("PRAGMA synchronous=NORMAL");
+        } catch (SQLException e) {
+            try {
+                connection.close();
+            } catch (SQLException closeError) {
+                e.addSuppressed(closeError);
+            }
+            throw e;
         }
         return connection;
     }
@@ -189,7 +196,7 @@ public class ChunkLodDatabase implements AutoCloseable {
      * @param z         the z coordinate
      * @param dimension the dimension identifier
      * @param lod       the level of detail
-     * @return color data, or null when the chunk is empty or not found
+     * @return the stored record; colors are null for empty or missing chunks
      * @throws SQLException if a database access error occurs
      */
     public StoredChunk loadChunk(int x, int z, String dimension, int lod) throws SQLException {
@@ -208,7 +215,11 @@ public class ChunkLodDatabase implements AutoCloseable {
         try (ResultSet rs = pstmt.executeQuery()) {
             if (!rs.next()) return new StoredChunk(false, null, false, 0);
             byte[] compressed = rs.getBytes("colors");
-            colors = compressed == null ? null : CompressionUtil.decompress(compressed);
+            try {
+                colors = compressed == null ? null : CompressionUtil.decompress(compressed);
+            } catch (RuntimeException e) {
+                throw new SQLException("Invalid chunk data at " + x + ", " + z + " in " + dimension + " (LOD " + lod + ")", e);
+            }
             dirty = rs.getBoolean("dirty");
             minSurface = rs.getInt("min_surface");
         }
@@ -230,36 +241,21 @@ public class ChunkLodDatabase implements AutoCloseable {
         }
     }
 
-    public void markDirty(int x, int z, String dimension, int lod) throws SQLException {
-        Connection connection = getConnection();
-        String sql = "UPDATE chunk_lod SET dirty = 1 WHERE x = ? AND z = ? AND dimension = ? AND lod = ?";
-        PreparedStatement pstmt = prepare(connection, sql);
-        pstmt.setInt(1, x);
-        pstmt.setInt(2, z);
-        pstmt.setString(3, dimension);
-        pstmt.setInt(4, lod);
-        pstmt.executeUpdate();
-    }
-
-    /**
-     * Deletes a chunk LOD record.
-     *
-     * @param x         the x coordinate
-     * @param z         the z coordinate
-     * @param dimension the dimension identifier
-     * @param lod       the level of detail
-     * @throws SQLException if a database access error occurs
-     */
-    public void deleteChunk(int x, int z, String dimension, int lod) throws SQLException {
-        Connection connection = getConnection();
-        String sql = "DELETE FROM chunk_lod WHERE x = ? AND z = ? AND dimension = ? AND lod = ?";
-
-        PreparedStatement pstmt = prepare(connection, sql);
-        pstmt.setInt(1, x);
-        pstmt.setInt(2, z);
-        pstmt.setString(3, dimension);
-        pstmt.setInt(4, lod);
-        pstmt.executeUpdate();
+    public boolean hasRecordedChunks(int x, int z, String dimension, int lod) throws SQLException {
+        long size = 1L << lod;
+        PreparedStatement statement = prepare(getConnection(), """
+                SELECT 1 FROM chunk_lod
+                WHERE x >= ? AND x < ? AND z >= ? AND z < ? AND dimension = ? AND lod = 0
+                LIMIT 1
+                """);
+        statement.setLong(1, x * size);
+        statement.setLong(2, (x + 1L) * size);
+        statement.setLong(3, z * size);
+        statement.setLong(4, (z + 1L) * size);
+        statement.setString(5, dimension);
+        try (ResultSet result = statement.executeQuery()) {
+            return result.next();
+        }
     }
 
     /**
@@ -302,16 +298,25 @@ public class ChunkLodDatabase implements AutoCloseable {
                     // The owning connection is closed below.
                 }
             }
+
             openStatements.clear();
             threadStatements.remove();
-            try {
-                for (Connection connection : openConnections) {
+
+            SQLException failure = null;
+            for (Connection connection : openConnections) {
+                try {
                     connection.close();
+                } catch (SQLException e) {
+                    if (failure == null) failure = e;
+                    else failure.addSuppressed(e);
                 }
-                openConnections.clear();
-                threadConnection.remove();
-            } catch (SQLException e) {
-                throw new RuntimeException("Failed to close database connection", e);
+            }
+
+            openConnections.clear();
+            threadConnection.remove();
+
+            if (failure != null) {
+                throw new RuntimeException("Failed to close database connections", failure);
             }
         }
     }

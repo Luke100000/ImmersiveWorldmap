@@ -11,6 +11,7 @@ build
 
 # run files
 runs
+run
 
 # raw resources
 *.kra

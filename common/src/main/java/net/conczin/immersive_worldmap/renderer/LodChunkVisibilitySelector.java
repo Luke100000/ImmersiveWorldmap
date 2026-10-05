@@ -26,7 +26,6 @@ public class LodChunkVisibilitySelector {
         }
     }
 
-    private static final float CHUNK_HEIGHT = 384f;
     private static final int CHUNK_SIZE = 16;
 
     private static final double SUBDIVIDE_DISTANCE_FACTOR = 12;
@@ -36,12 +35,13 @@ public class LodChunkVisibilitySelector {
     private static final float ANGLE_STEP = 1f / 64f;
     private static final long REFRESH_NANOS = 50_000_000L;
 
-    private record View(String dimension, float x, float y, float z, float yaw, float pitch, float zoom, float aspect) {
+    private record View(String dimension, int height, float x, float y, float z, float yaw, float pitch, float zoom, float aspect) {
     }
 
     private record CameraSnapshot(
             Matrix4f viewProjection,
             String dimension,
+            int height,
             double focusX,
             double focusZ,
             float zoom
@@ -244,7 +244,7 @@ public class LodChunkVisibilitySelector {
         float padding = POSITION_STEP + snapshot.zoom() * 0.001f;
         return dx * dx + dz * dz <= radius * radius
                && frustum.testAab(minX - padding, -padding, minZ - padding,
-                minX + size + padding, CHUNK_HEIGHT + padding, minZ + size + padding);
+                minX + size + padding, snapshot.height() + padding, minZ + size + padding);
     }
 
     private float worldSize(int lod) {
@@ -282,8 +282,8 @@ public class LodChunkVisibilitySelector {
         return (float) Math.ceil(zoom / CHUNK_SIZE * RENDER_DISTANCE);
     }
 
-    public void update(String dimension, float x, float y, float z, float yaw, float pitch, float zoom, float aspect) {
-        View view = new View(dimension, round(x, POSITION_STEP), round(y, POSITION_STEP), round(z, POSITION_STEP),
+    public void update(String dimension, int height, float x, float y, float z, float yaw, float pitch, float zoom, float aspect) {
+        View view = new View(dimension, height, round(x, POSITION_STEP), round(y, POSITION_STEP), round(z, POSITION_STEP),
                 round(yaw, ANGLE_STEP), round(pitch, ANGLE_STEP), round(zoom, POSITION_STEP), aspect);
         long now = System.nanoTime();
         if (view.equals(submittedView)) {
@@ -299,7 +299,7 @@ public class LodChunkVisibilitySelector {
             Matrix4f viewProjection = new Matrix4f().setPerspective((float) Math.toRadians(60), view.aspect(),
                             view.zoom() * 0.1f, view.zoom() * 10f)
                     .lookAt(eyeX, eyeY, eyeZ, view.x(), view.y(), view.z(), 0, 1, 0);
-            submittedSnapshot = new CameraSnapshot(viewProjection, dimension, view.x(), view.z(), view.zoom());
+            submittedSnapshot = new CameraSnapshot(viewProjection, dimension, height, view.x(), view.z(), view.zoom());
         }
         submittedNanos = now;
         pendingSnapshot.set(submittedSnapshot);

@@ -1,5 +1,15 @@
 {
-  "key.immersive_worldmap.open_lod_viewer": "Open Worldmap",
-  "category.immersive_worldmap": "Immersive Worldmap"
+  "key.immersive_worldmap.open_lod_viewer": "Open world map",
+  "category.immersive_worldmap": "Immersive Worldmap",
+  "screen.immersive_worldmap.title": "World map",
+  "screen.immersive_worldmap.controls.pan_drag": "Left drag: pan",
+  "screen.immersive_worldmap.controls.orbit_drag": "Right drag: orbit",
+  "screen.immersive_worldmap.controls.zoom": "Scroll: zoom",
+  "screen.immersive_worldmap.controls.pan_keys": "WASD/Arrows: pan",
+  "screen.immersive_worldmap.controls.rotate": "Q/E: rotate",
+  "screen.immersive_worldmap.controls.cave_view": "Tab: toggle cave view",
+  "screen.immersive_worldmap.controls.close": "%s/Esc: close",
+  "screen.immersive_worldmap.tasks": "Pending tasks: %s",
+  "screen.immersive_worldmap.clear_dimension": "F6: delete all map data for this dimension",
+  "screen.immersive_worldmap.clear_generated": "F7: rebuild lower-detail map data"
 }
-

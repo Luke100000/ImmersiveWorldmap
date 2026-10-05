@@ -42,9 +42,22 @@ public class ChunkLodProcessor {
     }
 
     public static void shutdown() {
+        if (EXECUTOR == null) return;
+
         EXECUTOR.shutdownNow();
         EXECUTOR.close();
         CHUNK_INGESTS.clear();
+
+        List<LodRequest> pending;
+        synchronized (LOD_LOCK) {
+            pending = List.copyOf(IN_FLIGHT.values());
+            IN_FLIGHT.clear();
+            LOD_CACHE.clear();
+        }
+
+        for (LodRequest request : pending) {
+            request.future.cancel(false);
+        }
     }
 
     public static int getPendingTaskCount() {
@@ -189,7 +202,7 @@ public class ChunkLodProcessor {
     }
 
     private static CompletableFuture<LodChunkData> loadLodAsync(CacheKey key, LodRequest request, long revision) {
-        return EXECUTOR.submit(key.lod(), key, () -> loadStoredChunk(key)).thenCompose(stored -> {
+        return EXECUTOR.submit(key.lod(), key, () -> loadStoredChunk(key, request, revision)).thenCompose(stored -> {
             if (stored.exists() && !stored.dirty()) {
                 return CompletableFuture.completedFuture(new LodChunkData(
                         key.chunkX(), key.chunkZ(), key.dimension(), key.lod(), stored.colors(), stored.minSurface()));
@@ -201,12 +214,18 @@ public class ChunkLodProcessor {
         });
     }
 
-    private static ChunkLodDatabase.StoredChunk loadStoredChunk(CacheKey key) {
+    private static ChunkLodDatabase.StoredChunk loadStoredChunk(CacheKey key, LodRequest request, long revision) {
         if (!DatabaseManager.isInitialized()) {
             return new ChunkLodDatabase.StoredChunk(false, null, false, 0);
         }
         try {
-            return DatabaseManager.getInstance().loadChunk(key.chunkX(), key.chunkZ(), key.dimension(), key.lod());
+            ChunkLodDatabase database = DatabaseManager.getInstance();
+            ChunkLodDatabase.StoredChunk stored = database.loadChunk(key.chunkX(), key.chunkZ(), key.dimension(), key.lod());
+            if (!stored.exists() && key.lod() > 0 && !database.hasRecordedChunks(key.chunkX(), key.chunkZ(), key.dimension(), key.lod())) {
+                upsertChunkData(key, null, 0, 0L, request, revision);
+                return new ChunkLodDatabase.StoredChunk(true, null, false, 0);
+            }
+            return stored;
         } catch (SQLException e) {
             ImmersiveWorldmap.LOGGER.warn("Failed to retrieve chunk LOD data: {}", e.getMessage());
             return new ChunkLodDatabase.StoredChunk(false, null, false, 0);
@@ -245,7 +264,7 @@ public class ChunkLodProcessor {
                 sourceHeight = Math.max(sourceHeight, source.getHeight());
             }
         }
-        int outHeight = Math.max(1, sourceHeight / 2);
+        int outHeight = Math.max(1, (sourceHeight + 1) / 2);
         byte[] result = new byte[16 * outHeight * 16];
 
         int[] freq = new int[256];
@@ -306,7 +325,7 @@ public class ChunkLodProcessor {
      * @param chunkZ    chunk Z coordinate
      * @param dimension dimension identifier
      * @param lod       LOD level
-     * @return LodChunkData record, or null if not found
+     * @return a future containing chunk data; missing chunks have empty data
      */
     public static CompletableFuture<LodChunkData> getLodChunkDataAsync(int chunkX, int chunkZ, String dimension, int lod) {
         CacheKey key = new CacheKey(chunkX, chunkZ, dimension, lod);
@@ -357,10 +376,12 @@ public class ChunkLodProcessor {
     }
 
     public static void discardQueuedTasksOutside(Set<CacheKey> visibleKeys) {
+        if (EXECUTOR == null) return;
         EXECUTOR.discardQueuedTasksOutside(tag -> tag instanceof CacheKey key && isCoveredByViewport(key, visibleKeys));
     }
 
     public static void clearQueuedViewportTasks() {
+        if (EXECUTOR == null) return;
         EXECUTOR.discardQueuedTasksOutside(tag -> false);
     }
 

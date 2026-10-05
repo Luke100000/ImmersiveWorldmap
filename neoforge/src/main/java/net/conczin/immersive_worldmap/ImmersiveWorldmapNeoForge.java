@@ -22,7 +22,7 @@ public class ImmersiveWorldmapNeoForge {
 
         Minecraft client = Minecraft.getInstance();
         while (ImmersiveWorldmap.MAP_VIEWER_KEY.consumeClick()) {
-            if (client.screen == null) {
+            if (client.screen == null && client.player != null && client.level != null) {
                 client.setScreen(new LodViewerScreen());
             }
         }

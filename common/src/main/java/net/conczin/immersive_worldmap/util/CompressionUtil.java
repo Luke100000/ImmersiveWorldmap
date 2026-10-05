@@ -54,6 +54,11 @@ public final class CompressionUtil {
         int origLen = readInt(blob, 0);
         int rleLen = readInt(blob, 4);
 
+        int runs = rleLen / 2;
+        if (rleLen < 0 || (rleLen & 1) != 0 || origLen < runs || origLen > (long) runs * 255) {
+            throw new IllegalArgumentException("Invalid chunk data lengths");
+        }
+
         byte[] rle = ensure(RLE_BUF, rleLen);
         D.decompress(blob, 8, rle, 0, rleLen);
 
@@ -69,6 +74,9 @@ public final class CompressionUtil {
             byte v = rle[i + 1];
             Arrays.fill(out, p, p + run, v);
             p += run;
+        }
+        if (p != out.length) {
+            throw new IllegalArgumentException("Incomplete chunk data runs");
         }
     }
 

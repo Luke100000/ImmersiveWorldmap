@@ -15,6 +15,7 @@ import net.minecraft.client.gui.screens.Screen;
 import net.minecraft.client.player.AbstractClientPlayer;
 import net.minecraft.client.renderer.entity.LivingEntityRenderer;
 import net.minecraft.network.chat.Component;
+import net.minecraft.util.FormattedCharSequence;
 import net.minecraft.world.entity.player.PlayerModelPart;
 import net.minecraft.world.level.LightLayer;
 import net.minecraft.world.phys.Vec3;
@@ -30,6 +31,7 @@ public class LodViewerScreen extends Screen {
     private static final int KEY_ESCAPE = 256;
     private static final int KEY_TAB = 258;
     private static final int PLAYER_MARKER_SIZE = 16;
+    private static final int OVERLAY_PADDING = 4;
     private static final float OPENING_DURATION_SECONDS = 0.6f;
 
     private final Minecraft minecraft;
@@ -40,7 +42,7 @@ public class LodViewerScreen extends Screen {
     private final Set<Integer> heldKeys = new HashSet<>();
 
     public LodViewerScreen() {
-        super(Component.literal("LOD Chunk Viewer"));
+        super(Component.translatable("screen.immersive_worldmap.title"));
 
         this.minecraft = Minecraft.getInstance();
 
@@ -124,6 +126,13 @@ public class LodViewerScreen extends Screen {
             return true;
         }
 
+        if (keyCode == GLFW.GLFW_KEY_F3) {
+            if (heldKeys.add(keyCode)) {
+                minecraft.getDebugOverlay().toggleOverlay();
+            }
+            return true;
+        }
+
         // Debug-only destructive actions, gated behind the F3 overlay.
         if (minecraft.getDebugOverlay().showDebugScreen()) {
             if (keyCode == GLFW.GLFW_KEY_F6) {
@@ -176,6 +185,14 @@ public class LodViewerScreen extends Screen {
 
     @Override
     public void render(GuiGraphics graphics, int mouseX, int mouseY, float partialTick) {
+        if (minecraft.level == null || minecraft.player == null) {
+            onClose();
+            return;
+        }
+        if (!minecraft.level.dimension().location().toString().equals(dimension)) {
+            loadState();
+            clearMeshes();
+        }
         super.render(graphics, mouseX, mouseY, partialTick);
 
         long now = System.nanoTime();
@@ -206,7 +223,7 @@ public class LodViewerScreen extends Screen {
             mv = new Matrix4f().lookAt(eyeX, eyeY, eyeZ, targetX, targetY, targetZ, 0, 1, 0);
             proj = new Matrix4f().setPerspective((float) Math.toRadians(60.0), (float) width / height, zoom * 0.1f, zoom * 10f);
 
-            LodChunkVisibilitySelector.get().update(dimension, targetX, targetY, targetZ,
+            LodChunkVisibilitySelector.get().update(dimension, minecraft.level.getHeight(), targetX, targetY, targetZ,
                     yawDegrees, pitchDegrees, zoom, (float) width / height);
         }
 
@@ -227,16 +244,28 @@ public class LodViewerScreen extends Screen {
 
         renderPlayers(graphics, mv, proj);
 
+        var controlsText = Component.translatable("screen.immersive_worldmap.controls.pan_drag")
+                .append("   ").append(Component.translatable("screen.immersive_worldmap.controls.orbit_drag"))
+                .append("   ").append(Component.translatable("screen.immersive_worldmap.controls.zoom"))
+                .append("   ").append(Component.translatable("screen.immersive_worldmap.controls.pan_keys"))
+                .append("   ").append(Component.translatable("screen.immersive_worldmap.controls.rotate"))
+                .append("   ").append(Component.translatable("screen.immersive_worldmap.controls.cave_view"))
+                .append("   ").append(Component.translatable("screen.immersive_worldmap.controls.close",
+                        ImmersiveWorldmap.MAP_VIEWER_KEY.getTranslatedKeyMessage()));
         if (minecraft.getDebugOverlay().showDebugScreen()) {
             int tasks = ChunkLodProcessor.getPendingTaskCount() + LodChunkPageManager.INSTANCE.getPendingTaskCount();
-            drawOverlay(graphics, "Tasks: " + tasks, 20, 20);
-            drawOverlay(graphics, "F6: clear dimension LODs (database + cache)", 20, 40);
-            drawOverlay(graphics, "F7: clear generated LODs (LOD > 0)", 20, 60);
+            drawOverlay(graphics, Component.translatable("screen.immersive_worldmap.tasks", tasks).getVisualOrderText(), 20, 20);
+            controlsText.append("\n").append(Component.translatable("screen.immersive_worldmap.clear_dimension"))
+                    .append("   ").append(Component.translatable("screen.immersive_worldmap.clear_generated"));
         }
 
-        String closeKey = ImmersiveWorldmap.MAP_VIEWER_KEY.getTranslatedKeyMessage().getString();
-        String controls = "LMB: pan   RMB: orbit   Wheel: zoom   WASD/Arrows: pan   Q/E: rotate   Tab: cave view   " + closeKey + ": close";
-        drawOverlay(graphics, controls, 20, this.height - 20);
+        var controls = font.split(controlsText, Math.max(1, width - 80));
+        int lineHeight = font.lineHeight + OVERLAY_PADDING * 2 + 2;
+        int controlsY = height - 20 - (controls.size() - 1) * lineHeight;
+        for (FormattedCharSequence line : controls) {
+            drawOverlay(graphics, line, 20, controlsY);
+            controlsY += lineHeight;
+        }
 
         MapCompass.render(graphics, font, yawDegrees, width, height);
 
@@ -246,10 +275,9 @@ public class LodViewerScreen extends Screen {
         }
     }
 
-    private void drawOverlay(GuiGraphics graphics, String text, int x, int y) {
-        int padding = 4;
-        graphics.fill(x - padding, y - padding,
-                x + this.font.width(text) + padding, y + this.font.lineHeight + padding,
+    private void drawOverlay(GuiGraphics graphics, FormattedCharSequence text, int x, int y) {
+        graphics.fill(x - OVERLAY_PADDING, y - OVERLAY_PADDING,
+                x + this.font.width(text) + OVERLAY_PADDING, y + this.font.lineHeight + OVERLAY_PADDING,
                 0x80000000);
         graphics.drawString(this.font, text, x, y, 0xFFFFFFFF);
     }

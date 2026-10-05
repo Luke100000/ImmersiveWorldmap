@@ -167,6 +167,7 @@ public class Camera3D {
     }
 
     public boolean mouseScrolled(double scrollY) {
+        if (scrollY == 0) return false;
         float factor = (scrollY > 0) ? (1f / 1.12f) : 1.12f;
         targetZoom = Math.clamp(targetZoom * factor, ZOOM_MIN, ZOOM_MAX);
         return true;
@@ -245,6 +246,7 @@ public class Camera3D {
         targetX = smoothX = x;
         targetY = smoothY = y;
         targetZ = smoothZ = z;
+        velX = velZ = 0f;
     }
 
     public void setZoom(float zoom) {
