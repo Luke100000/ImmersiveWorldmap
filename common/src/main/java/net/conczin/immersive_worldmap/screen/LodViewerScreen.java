@@ -143,6 +143,13 @@ public class LodViewerScreen extends Screen {
             return true;
         }
 
+        if (keyCode == GLFW.GLFW_KEY_F1) {
+            if (heldKeys.add(keyCode)) {
+                minecraft.options.hideGui = !minecraft.options.hideGui;
+            }
+            return true;
+        }
+
         if (keyCode == GLFW.GLFW_KEY_F3) {
             if (heldKeys.add(keyCode)) {
                 minecraft.getDebugOverlay().toggleOverlay();
@@ -269,6 +276,17 @@ public class LodViewerScreen extends Screen {
 
         renderPlayers(graphics, mv, proj);
 
+        if (!minecraft.options.hideGui) {
+            drawDebug(graphics, yawDegrees);
+        }
+
+        int fadeAlpha = Math.round(openingBonus * 255f);
+        if (fadeAlpha > 0) {
+            graphics.fill(0, 0, this.width, this.height, fadeAlpha << 24);
+        }
+    }
+
+    private void drawDebug(GuiGraphics graphics, float yawDegrees) {
         var controlsText = Component.translatable("screen.immersive_worldmap.controls.pan_drag")
                 .append("   ").append(Component.translatable("screen.immersive_worldmap.controls.orbit_drag"))
                 .append("   ").append(Component.translatable("screen.immersive_worldmap.controls.zoom"))
@@ -278,6 +296,7 @@ public class LodViewerScreen extends Screen {
                 .append("   ").append(Component.translatable("screen.immersive_worldmap.controls.cave_view"))
                 .append("   ").append(Component.translatable("screen.immersive_worldmap.controls.close",
                         ImmersiveWorldmap.MAP_VIEWER_KEY.getTranslatedKeyMessage()));
+
         if (minecraft.getDebugOverlay().showDebugScreen()) {
             int tasks = ChunkLodProcessor.getPendingTaskCount() + LodChunkPageManager.INSTANCE.getPendingTaskCount();
             drawOverlay(graphics, Component.translatable("screen.immersive_worldmap.tasks", tasks).getVisualOrderText(), 20, 20);
@@ -294,11 +313,6 @@ public class LodViewerScreen extends Screen {
         }
 
         MapCompass.render(graphics, font, yawDegrees, width, height);
-
-        int fadeAlpha = Math.round(openingBonus * 255f);
-        if (fadeAlpha > 0) {
-            graphics.fill(0, 0, this.width, this.height, fadeAlpha << 24);
-        }
     }
 
     private void drawOverlay(GuiGraphics graphics, FormattedCharSequence text, int x, int y) {
