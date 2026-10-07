@@ -35,7 +35,8 @@ public class LodChunkVisibilitySelector {
     private static final float ANGLE_STEP = 1f / 64f;
     private static final long REFRESH_NANOS = 50_000_000L;
 
-    private record View(String dimension, int height, float x, float y, float z, float yaw, float pitch, float zoom, float aspect) {
+    private record View(String dimension, int height, float x, float y, float z, float yaw, float pitch, float zoom,
+                        float aspect) {
     }
 
     private record CameraSnapshot(
@@ -164,12 +165,16 @@ public class LodChunkVisibilitySelector {
         selected.sort(byDistance);
         Set<LodChunkMesh> interested = new LinkedHashSet<>(targetMeshes);
         interested.addAll(selected);
+        LodChunkMeshManager.INSTANCE.setViewport(interested);
+
         for (LodChunkMesh mesh : interested) {
             if (!running) return new Selection(List.of());
             LodChunkMeshManager.INSTANCE.retain(mesh);
             mesh.requestLoad();
         }
+
         updateTaskInterest(new ArrayList<>(interested));
+
         return result;
     }
 

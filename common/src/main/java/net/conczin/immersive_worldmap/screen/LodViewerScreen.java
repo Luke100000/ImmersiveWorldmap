@@ -9,6 +9,7 @@ import net.conczin.immersive_worldmap.lod.ChunkLodProcessor;
 import net.conczin.immersive_worldmap.renderer.LodChunkMeshManager;
 import net.conczin.immersive_worldmap.renderer.LodChunkPageManager;
 import net.conczin.immersive_worldmap.renderer.LodChunkVisibilitySelector;
+import net.conczin.immersive_worldmap.renderer.MapMemoryTracker;
 import net.conczin.immersive_worldmap.settings.SharedSettings;
 import net.minecraft.client.Minecraft;
 import net.minecraft.client.gui.GuiGraphics;
@@ -312,6 +313,17 @@ public class LodViewerScreen extends Screen {
         if (minecraft.getDebugOverlay().showDebugScreen()) {
             int tasks = ChunkLodProcessor.getPendingTaskCount() + LodChunkPageManager.INSTANCE.getPendingTaskCount();
             drawOverlay(graphics, Component.translatable("screen.immersive_worldmap.tasks", tasks).getVisualOrderText(), 20, 20);
+            var cacheText = Component.translatable("screen.immersive_worldmap.cache.colors", MapMemoryTracker.colorCacheSize())
+                    .append(" | ").append(Component.translatable("screen.immersive_worldmap.cache.cpu",
+                            MapMemoryTracker.cpuCacheSize(), MapMemoryTracker.cpuCacheBudget()))
+                    .append(" | ").append(Component.translatable("screen.immersive_worldmap.cache.pages",
+                            MapMemoryTracker.pageGpuSize(), MapMemoryTracker.pageRamSize()))
+                    .append(" | ").append(Component.translatable("screen.immersive_worldmap.cache.recording", MapMemoryTracker.recordingQueueSize()));
+            int cacheY = 20 + font.lineHeight + OVERLAY_PADDING * 2 + 2;
+            for (FormattedCharSequence line : font.split(cacheText, Math.max(1, width - 40))) {
+                drawOverlay(graphics, line, 20, cacheY);
+                cacheY += font.lineHeight + OVERLAY_PADDING * 2 + 2;
+            }
             controlsText.append("\n").append(Component.translatable("screen.immersive_worldmap.clear_dimension"))
                     .append("   ").append(Component.translatable("screen.immersive_worldmap.clear_generated"));
         }
@@ -396,10 +408,15 @@ public class LodViewerScreen extends Screen {
     }
 
     @Override
-    public void onClose() {
-        ChunkLodProcessor.clearQueuedViewportTasks();
-        LodChunkVisibilitySelector.reset();
-        super.onClose();
+    public void added() {
+        super.added();
+        ImmersiveWorldmapClient.onMapOpened();
+    }
+
+    @Override
+    public void removed() {
+        ImmersiveWorldmapClient.onMapClosed();
+        super.removed();
     }
 
     @Override

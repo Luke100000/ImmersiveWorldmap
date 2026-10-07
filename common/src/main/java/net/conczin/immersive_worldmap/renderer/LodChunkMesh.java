@@ -1,6 +1,7 @@
 package net.conczin.immersive_worldmap.renderer;
 
 import net.conczin.immersive_worldmap.ImmersiveWorldmap;
+import net.conczin.immersive_worldmap.lod.ChunkLodProcessor;
 
 import java.util.concurrent.CancellationException;
 
@@ -27,6 +28,10 @@ public class LodChunkMesh {
 
     public boolean isLoaded() {
         return loaded;
+    }
+
+    ChunkLodProcessor.CacheKey key() {
+        return new ChunkLodProcessor.CacheKey(chunkX, chunkZ, dimension, lod);
     }
 
     byte[] geometry() {

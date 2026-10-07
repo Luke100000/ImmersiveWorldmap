@@ -4,17 +4,30 @@ import net.conczin.immersive_worldmap.database.DatabaseManager;
 import net.conczin.immersive_worldmap.lod.ChunkLodProcessor;
 import net.conczin.immersive_worldmap.lod.ServerChunkRecorder;
 import net.conczin.immersive_worldmap.renderer.LodChunkMeshManager;
+import net.conczin.immersive_worldmap.renderer.LodChunkPageManager;
 import net.conczin.immersive_worldmap.renderer.LodChunkVisibilitySelector;
+import net.conczin.immersive_worldmap.renderer.MapMemoryTracker;
 import net.minecraft.client.KeyMapping;
 import net.minecraft.client.Minecraft;
 import net.minecraft.client.multiplayer.ServerData;
 import org.lwjgl.glfw.GLFW;
 
 import java.nio.file.Path;
+import java.util.concurrent.TimeUnit;
+import java.util.function.Predicate;
 
 public final class ImmersiveWorldmapClient {
     public static final KeyMapping MAP_VIEWER_KEY = new KeyMapping(
             "key.immersive_worldmap.open_lod_viewer", GLFW.GLFW_KEY_M, "category.immersive_worldmap");
+
+    private static final double RETENTION_RADIUS = LodChunkVisibilitySelector.renderRadius(225f);
+
+    private static long closedAt;
+    private static long lastMaintenance;
+    private static double closedX;
+    private static double closedZ;
+    private static String closedDimension;
+    private static boolean mapOpen;
 
     private ImmersiveWorldmapClient() {
     }
@@ -26,6 +39,48 @@ public final class ImmersiveWorldmapClient {
 
     public static void onClientTick() {
         LodChunkMeshManager.tick();
+        long now = System.nanoTime();
+        if (now - lastMaintenance < TimeUnit.SECONDS.toNanos(1)) return;
+        lastMaintenance = now;
+
+        Minecraft minecraft = Minecraft.getInstance();
+        if (!mapOpen && closedAt != 0 && minecraft.player != null && minecraft.level != null) {
+            double dx = minecraft.player.getX() - closedX;
+            double dz = minecraft.player.getZ() - closedZ;
+            if (now - closedAt >= TimeUnit.MINUTES.toNanos(5)
+                || !minecraft.level.dimension().location().toString().equals(closedDimension)
+                || dx * dx + dz * dz > RETENTION_RADIUS * RETENTION_RADIUS) {
+                LodChunkMeshManager.INSTANCE.prune(key -> false);
+                ChunkLodProcessor.clearCache();
+                closedAt = 0;
+            }
+        }
+
+        MapMemoryTracker.update();
+    }
+
+    public static void onMapOpened() {
+        mapOpen = true;
+        closedAt = 0;
+        LodChunkPageManager.INSTANCE.setActive(true);
+    }
+
+    public static void onMapClosed() {
+        LodChunkVisibilitySelector.reset();
+        ChunkLodProcessor.clearQueuedViewportTasks();
+        LodChunkPageManager.INSTANCE.setActive(false);
+        mapOpen = false;
+        Minecraft minecraft = Minecraft.getInstance();
+        Predicate<ChunkLodProcessor.CacheKey> keep = key -> false;
+        if (minecraft.player != null && minecraft.level != null) {
+            closedX = minecraft.player.getX();
+            closedZ = minecraft.player.getZ();
+            closedDimension = minecraft.level.dimension().location().toString();
+            closedAt = System.nanoTime();
+            keep = key -> key.lod() == 0 && key.isWithin(closedDimension, closedX, closedZ, RETENTION_RADIUS);
+        }
+        LodChunkMeshManager.INSTANCE.prune(keep);
+        ChunkLodProcessor.pruneCache(keep);
     }
 
     public static boolean shouldRecordChunks() {
@@ -33,6 +88,8 @@ public final class ImmersiveWorldmapClient {
     }
 
     public static void start() {
+        closedAt = 0;
+
         LodChunkVisibilitySelector.reset();
         LodChunkMeshManager.INSTANCE.clear();
 
@@ -53,6 +110,10 @@ public final class ImmersiveWorldmapClient {
     }
 
     public static void shutdown() {
+        closedAt = 0;
+        mapOpen = false;
+
+        LodChunkPageManager.INSTANCE.setActive(false);
         LodChunkVisibilitySelector.reset();
         ChunkLodProcessor.clearQueuedViewportTasks();
         if (shouldRecordChunks()) {

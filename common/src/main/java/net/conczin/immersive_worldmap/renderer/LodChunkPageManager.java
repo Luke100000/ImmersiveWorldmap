@@ -1,12 +1,9 @@
 package net.conczin.immersive_worldmap.renderer;
 
 import com.mojang.blaze3d.systems.RenderSystem;
-import com.mojang.blaze3d.vertex.ByteBufferBuilder;
-import com.mojang.blaze3d.vertex.DefaultVertexFormat;
-import com.mojang.blaze3d.vertex.MeshData;
-import com.mojang.blaze3d.vertex.VertexBuffer;
-import com.mojang.blaze3d.vertex.VertexFormat;
+import com.mojang.blaze3d.vertex.*;
 import net.conczin.immersive_worldmap.ImmersiveWorldmap;
+import net.conczin.immersive_worldmap.lod.ChunkLodProcessor;
 import net.conczin.immersive_worldmap.screen.MapBackgroundTexture;
 import net.conczin.immersive_worldmap.util.PriorityThreadPoolExecutor;
 import net.conczin.immersive_worldmap.util.ThreadPoolUtil;
@@ -21,13 +18,7 @@ import org.lwjgl.system.MemoryUtil;
 
 import java.nio.ByteBuffer;
 import java.nio.IntBuffer;
-import java.util.ArrayList;
-import java.util.Arrays;
-import java.util.Comparator;
-import java.util.HashMap;
-import java.util.List;
-import java.util.Map;
-import java.util.Objects;
+import java.util.*;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ConcurrentLinkedQueue;
 
@@ -39,8 +30,7 @@ public final class LodChunkPageManager {
     private static final int VERTEX_SIZE = DefaultVertexFormat.POSITION_COLOR.getVertexSize();
     private static final int QUAD_SIZE = 4 * VERTEX_SIZE;
     private static final int MAX_UPLOADS_PER_FRAME = 1;
-    private static final int MAX_PAGES = 256;
-    private static final long MAX_GPU_BYTES = 128L * 1024 * 1024;
+
     public static final LodChunkPageManager INSTANCE = new LodChunkPageManager();
 
     private final Map<PageKey, Page> pages = new ConcurrentHashMap<>();
@@ -50,6 +40,9 @@ public final class LodChunkPageManager {
     private long gpuBytes;
     private long frame;
     private long generation;
+    private volatile boolean active;
+    private volatile long assemblingBytes;
+    private Set<ChunkLodProcessor.CacheKey> previousViewport = Set.of();
 
     private LodChunkPageManager() {
     }
@@ -63,7 +56,8 @@ public final class LodChunkPageManager {
     }
 
     synchronized void offer(LodChunkMesh chunk, byte[] geometry) {
-        if (chunk.pageGeneration() != generation || chunk.geometry() != geometry) return;
+        if (!active || chunk.pageGeneration() != generation || chunk.geometry() != geometry
+            || !LodChunkMeshManager.INSTANCE.viewport().contains(chunk.key())) return;
         if (geometry.length == 0 && !pages.containsKey(key(chunk))) {
             chunk.onPageUploaded(geometry);
             return;
@@ -110,7 +104,7 @@ public final class LodChunkPageManager {
                 page.draw(entry.getValue(), mv, proj, shader, focusX, focusZ);
             }
         }
-        trim();
+        pruneUnusedPages(visible);
     }
 
     private boolean isDrawable(LodChunkMesh chunk) {
@@ -123,6 +117,23 @@ public final class LodChunkPageManager {
 
     public synchronized void clear() {
         generation++;
+        releasePages();
+    }
+
+    public synchronized void setActive(boolean active) {
+        this.active = active;
+        if (!active) releasePages();
+    }
+
+    public long getGpuBytes() {
+        return gpuBytes;
+    }
+
+    public long getEstimatedRamBytes() {
+        return pages.size() * 16L * 1024 + assemblingBytes + pages.values().stream().mapToLong(Page::readyBytes).sum();
+    }
+
+    private void releasePages() {
         for (Page page : pages.values()) {
             page.close();
         }
@@ -130,6 +141,7 @@ public final class LodChunkPageManager {
         buildExecutor.getQueue().clear();
         uploadQueue.clear();
         gpuBytes = 0;
+        previousViewport = Set.of();
     }
 
     private static PageKey key(LodChunkMesh chunk) {
@@ -147,12 +159,14 @@ public final class LodChunkPageManager {
         } catch (Throwable error) {
             ImmersiveWorldmap.LOGGER.error("Failed to build LOD page {}", page.key, error);
             page.buildFailed(snapshot.revision);
+            assemblingBytes = 0;
             return;
         }
         page.built(build);
+        assemblingBytes = 0;
     }
 
-    private static PageBuild assemble(Snapshot snapshot) {
+    private PageBuild assemble(Snapshot snapshot) {
         int[] baseVertices = new int[SLOTS];
         int[] indexCounts = new int[SLOTS];
         int totalBytes = 0;
@@ -173,6 +187,7 @@ public final class LodChunkPageManager {
         ByteBufferBuilder buffer = null;
         MeshData mesh = null;
         if (totalBytes > 0) {
+            assemblingBytes = totalBytes;
             buffer = new ByteBufferBuilder(totalBytes);
             try {
                 ByteBuffer target = MemoryUtil.memByteBuffer(buffer.reserve(totalBytes), totalBytes);
@@ -209,16 +224,29 @@ public final class LodChunkPageManager {
         }
     }
 
-    private void trim() {
-        while (pages.size() > MAX_PAGES || gpuBytes > MAX_GPU_BYTES) {
-            Page oldest = pages.values().stream()
-                    .filter(page -> page.lastDrawFrame != frame)
-                    .min(Comparator.comparingLong(page -> page.lastDrawFrame))
-                    .orElse(null);
-            if (oldest == null || !pages.remove(oldest.key, oldest)) return;
-            gpuBytes -= oldest.gpuBytes;
-            oldest.close();
+    private void pruneUnusedPages(List<LodChunkMesh> visible) {
+        Set<ChunkLodProcessor.CacheKey> viewport = new HashSet<>(LodChunkMeshManager.INSTANCE.viewport());
+        for (LodChunkMesh mesh : visible) {
+            viewport.add(mesh.key());
         }
+
+        Set<PageKey> needed = new HashSet<>();
+        for (ChunkLodProcessor.CacheKey key : viewport) {
+            needed.add(new PageKey(key.dimension(), key.lod(), Math.floorDiv(key.chunkX(), PAGE_SIZE), Math.floorDiv(key.chunkZ(), PAGE_SIZE)));
+        }
+
+        boolean changed = !viewport.equals(previousViewport);
+        for (Page page : pages.values()) {
+            if (page.lastDrawFrame != frame && !needed.contains(page.key)) {
+                if (pages.remove(page.key, page)) {
+                    gpuBytes -= page.gpuBytes;
+                    page.close();
+                }
+            } else if (changed) {
+                page.prune(viewport);
+            }
+        }
+        previousViewport = viewport;
     }
 
     private record PageKey(String dimension, int lod, int x, int z) {
@@ -268,6 +296,28 @@ public final class LodChunkPageManager {
 
         Page(PageKey key) {
             this.key = key;
+        }
+
+        synchronized long readyBytes() {
+            return ready == null ? 0 : ready.bytes;
+        }
+
+        synchronized void prune(Set<ChunkLodProcessor.CacheKey> keep) {
+            boolean changed = false;
+            for (int slot = 0; slot < SLOTS; slot++) {
+                LodChunkMesh chunk = chunks[slot];
+                if (chunk != null && !keep.contains(chunk.key())) {
+                    chunk.onPageEvicted();
+                    installedChunks[slot] = null;
+                    chunks[slot] = null;
+                    geometry[slot] = null;
+                    changed = true;
+                }
+            }
+            if (changed) {
+                revision++;
+                queueBuild();
+            }
         }
 
         synchronized boolean offer(LodChunkMesh chunk, byte[] data) {
@@ -325,7 +375,7 @@ public final class LodChunkPageManager {
             if (revision != failedRevision) queueBuild();
         }
 
-        void install(PageBuild build) {
+        synchronized void install(PageBuild build) {
             if (closed) return;
             VertexBuffer next = null;
             if (build.mesh != null) {
@@ -349,6 +399,9 @@ public final class LodChunkPageManager {
             for (int slot = 0; slot < SLOTS; slot++) {
                 LodChunkMesh previous = installedChunks[slot];
                 LodChunkMesh current = build.snapshot.chunks[slot];
+                if (chunks[slot] != current) {
+                    current = null;
+                }
                 if (previous != null && previous != current) previous.onPageEvicted();
                 installedChunks[slot] = current;
                 if (current != null) current.onPageUploaded(build.snapshot.geometry[slot]);

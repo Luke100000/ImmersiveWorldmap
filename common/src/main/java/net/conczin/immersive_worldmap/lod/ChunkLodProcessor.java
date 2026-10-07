@@ -15,9 +15,11 @@ import net.minecraft.world.level.chunk.PalettedContainer;
 
 import java.sql.SQLException;
 import java.util.*;
+import java.util.concurrent.CancellationException;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.function.Consumer;
+import java.util.function.Predicate;
 
 /**
  * Processes chunks and generates LODs.
@@ -31,7 +33,11 @@ public class ChunkLodProcessor {
     private static final TickLruCache<CacheKey, LodChunkData> LOD_CACHE = new TickLruCache<>(256);
     private static final Object LOD_LOCK = new Object();
     private static final Map<CacheKey, LodRequest> IN_FLIGHT = new HashMap<>();
-    private static final Map<CacheKey, Object> CHUNK_INGESTS = new ConcurrentHashMap<>();
+    private static final Map<CacheKey, ChunkSnapshot> CHUNK_INGESTS = new ConcurrentHashMap<>();
+    private static final Set<CacheKey> RECORDING_TASKS = ConcurrentHashMap.newKeySet();
+
+    private record ChunkSnapshot(List<PalettedContainer<BlockState>> sections, long estimatedBytes) {
+    }
 
     private static final class LodRequest {
         final CompletableFuture<LodChunkData> future = new CompletableFuture<>();
@@ -44,6 +50,7 @@ public class ChunkLodProcessor {
 
     public static void start() {
         CHUNK_INGESTS.clear();
+        RECORDING_TASKS.clear();
         EXECUTOR = ThreadPoolUtil.createLowPriorityFixedThreadPool("ImmersiveWorldmap");
         synchronized (LOD_LOCK) {
             LOD_CACHE.clear();
@@ -59,6 +66,7 @@ public class ChunkLodProcessor {
         EXECUTOR.shutdown();
         EXECUTOR.close();
         CHUNK_INGESTS.clear();
+        RECORDING_TASKS.clear();
 
         List<LodRequest> pending;
         synchronized (LOD_LOCK) {
@@ -78,9 +86,28 @@ public class ChunkLodProcessor {
     }
 
     public static void clearCache() {
+        pruneCache(key -> false);
+    }
+
+    public static void pruneCache(Predicate<CacheKey> keep) {
+        List<LodRequest> cancelled = new ArrayList<>();
         synchronized (LOD_LOCK) {
-            LOD_CACHE.clear();
+            LOD_CACHE.removeIf(key -> !keep.test(key));
+            IN_FLIGHT.entrySet().removeIf(entry -> {
+                if (keep.test(entry.getKey())) return false;
+                cancelled.add(entry.getValue());
+                return true;
+            });
         }
+        cancelled.forEach(request -> request.future.cancel(false));
+    }
+
+    public static long getColorCacheBytes() {
+        return LOD_CACHE.values().stream().mapToLong(data -> data.data() == null ? 0 : data.data().length).sum();
+    }
+
+    public static long getRecordingQueueBytes() {
+        return CHUNK_INGESTS.values().stream().mapToLong(ChunkSnapshot::estimatedBytes).sum();
     }
 
     public static void processChunk(ChunkAccess chunk, Level level) {
@@ -100,15 +127,36 @@ public class ChunkLodProcessor {
         List<PalettedContainer<BlockState>> sections = Arrays.stream(chunk.getSections())
                 .map(section -> section.hasOnlyAir() ? null : section.getStates().copy()).toList();
 
-        Object revision = new Object();
-        CHUNK_INGESTS.put(key, revision);
+        long bytes = 128L + sections.size() * 8L + sections.stream().filter(Objects::nonNull).mapToLong(section -> section.getSerializedSize() + 128L).sum();
+        CHUNK_INGESTS.put(key, new ChunkSnapshot(sections, bytes));
+        queueRecording(key, priority);
+    }
+
+    private static void queueRecording(CacheKey key, int priority) {
+        if (!RECORDING_TASKS.add(key)) return;
+
         EXECUTOR.submit(priority, () -> {
             try {
-                processChunkSync(key, sections, revision);
+                ChunkSnapshot snapshot;
+                while ((snapshot = CHUNK_INGESTS.get(key)) != null) {
+                    try {
+                        processChunkSync(key, snapshot.sections(), snapshot);
+                    } catch (RuntimeException error) {
+                        ImmersiveWorldmap.LOGGER.warn("Failed to record chunk {}, {}", key.chunkX(), key.chunkZ(), error);
+                    }
+                    if (CHUNK_INGESTS.remove(key, snapshot)) break;
+                }
             } finally {
-                CHUNK_INGESTS.remove(key, revision);
+                RECORDING_TASKS.remove(key);
+                if (CHUNK_INGESTS.containsKey(key) && !EXECUTOR.isShutdown()) queueRecording(key, priority);
             }
             return null;
+        }).whenComplete((ignored, error) -> {
+            if (error != null) {
+                RECORDING_TASKS.remove(key);
+                CHUNK_INGESTS.remove(key);
+                ImmersiveWorldmap.LOGGER.warn("Failed to record chunk {}, {}: {}", key.chunkX(), key.chunkZ(), error.getMessage());
+            }
         });
     }
 
@@ -116,7 +164,7 @@ public class ChunkLodProcessor {
         return (x * height * 16) + (y * 16) + z;
     }
 
-    private static void processChunkSync(CacheKey key, List<PalettedContainer<BlockState>> sections, Object revision) {
+    private static void processChunkSync(CacheKey key, List<PalettedContainer<BlockState>> sections, ChunkSnapshot revision) {
         if (!DatabaseManager.isInitialized() || CHUNK_INGESTS.get(key) != revision) {
             return;
         }
@@ -216,6 +264,9 @@ public class ChunkLodProcessor {
 
     private static CompletableFuture<LodChunkData> loadLodAsync(CacheKey key, LodRequest request, long revision) {
         return EXECUTOR.submit(key.lod(), key, () -> loadStoredChunk(key, request, revision)).thenCompose(stored -> {
+            if (request.future.isCancelled()) {
+                return CompletableFuture.failedFuture(new CancellationException());
+            }
             if (stored.exists() && !stored.dirty()) {
                 return CompletableFuture.completedFuture(new LodChunkData(
                         key.chunkX(), key.chunkZ(), key.dimension(), key.lod(), stored.colors(), stored.minSurface()));
@@ -248,12 +299,18 @@ public class ChunkLodProcessor {
     private static CompletableFuture<LodChunkData> generateLodAsync(CacheKey key, LodRequest request, long revision) {
         int baseX = key.chunkX() * 2;
         int baseZ = key.chunkZ() * 2;
-        List<CompletableFuture<LodChunkData>> sources = List.of(
-                getLodChunkDataAsync(baseX, baseZ, key.dimension(), key.lod() - 1),
-                getLodChunkDataAsync(baseX + 1, baseZ, key.dimension(), key.lod() - 1),
-                getLodChunkDataAsync(baseX, baseZ + 1, key.dimension(), key.lod() - 1),
-                getLodChunkDataAsync(baseX + 1, baseZ + 1, key.dimension(), key.lod() - 1)
-        );
+        List<CompletableFuture<LodChunkData>> sources;
+        synchronized (LOD_LOCK) {
+            if (IN_FLIGHT.get(key) != request) {
+                return CompletableFuture.failedFuture(new CancellationException());
+            }
+            sources = List.of(
+                    getLodChunkDataAsync(baseX, baseZ, key.dimension(), key.lod() - 1),
+                    getLodChunkDataAsync(baseX + 1, baseZ, key.dimension(), key.lod() - 1),
+                    getLodChunkDataAsync(baseX, baseZ + 1, key.dimension(), key.lod() - 1),
+                    getLodChunkDataAsync(baseX + 1, baseZ + 1, key.dimension(), key.lod() - 1)
+            );
+        }
         return CompletableFuture.allOf(sources.toArray(CompletableFuture[]::new)).thenCompose(ignored -> {
             if (sources.stream().map(CompletableFuture::join).allMatch(LodChunkData::empty)) {
                 upsertChunkData(key, null, 0, 0L, request, revision);
@@ -412,5 +469,15 @@ public class ChunkLodProcessor {
     }
 
     public record CacheKey(int chunkX, int chunkZ, String dimension, int lod) {
+        public boolean isWithin(String dimension, double x, double z, double radius) {
+            if (!this.dimension.equals(dimension)) return false;
+
+            long size = 16L << lod;
+            double minX = chunkX * size;
+            double minZ = chunkZ * size;
+            double dx = x - Math.clamp(x, minX, minX + size);
+            double dz = z - Math.clamp(z, minZ, minZ + size);
+            return dx * dx + dz * dz <= radius * radius;
+        }
     }
 }

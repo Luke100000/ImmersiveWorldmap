@@ -1,10 +1,6 @@
 package net.conczin.immersive_worldmap.util;
 
-import java.util.ArrayList;
-import java.util.Iterator;
-import java.util.LinkedHashMap;
-import java.util.List;
-import java.util.Map;
+import java.util.*;
 import java.util.concurrent.atomic.AtomicLong;
 import java.util.function.Predicate;
 
@@ -45,24 +41,9 @@ public final class TickLruCache<K, V> {
         return previous == null ? null : previous.value;
     }
 
-    public synchronized V putIfAbsent(K key, V value) {
-        Entry<V> existing = entries.get(key);
-        if (existing != null) {
-            existing.lastAccessTick = CURRENT_TICK.get();
-            return existing.value;
-        }
-        entries.put(key, new Entry<>(value));
-        evictOldEntries();
-        return null;
-    }
-
     public synchronized V remove(K key) {
         Entry<V> removed = entries.remove(key);
         return removed == null ? null : removed.value;
-    }
-
-    public synchronized int size() {
-        return entries.size();
     }
 
     public synchronized void removeIf(Predicate<K> predicate) {

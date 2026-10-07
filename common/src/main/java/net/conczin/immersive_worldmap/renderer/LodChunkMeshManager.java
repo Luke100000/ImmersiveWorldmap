@@ -6,10 +6,8 @@ import net.conczin.immersive_worldmap.util.TickLruCache;
 
 import java.lang.ref.ReferenceQueue;
 import java.lang.ref.WeakReference;
-import java.util.ArrayList;
-import java.util.HashMap;
-import java.util.List;
-import java.util.Map;
+import java.util.*;
+import java.util.function.Predicate;
 
 public final class LodChunkMeshManager {
     public static final LodChunkMeshManager INSTANCE = new LodChunkMeshManager();
@@ -18,7 +16,9 @@ public final class LodChunkMeshManager {
         TickLruCache.tick();
     }
 
-    private final TickLruCache<ChunkLodProcessor.CacheKey, LodChunkMesh> cache = new TickLruCache<>(4096);
+    private final Map<ChunkLodProcessor.CacheKey, LodChunkMesh> cache = new LinkedHashMap<>(256, 0.75f, true);
+    private volatile Set<ChunkLodProcessor.CacheKey> viewport = Set.of();
+    private long byteBudget = 128L * 1024 * 1024;
 
     // Cache eviction must not duplicate meshes still held by a page, selection, or pending build.
     private final Map<ChunkLodProcessor.CacheKey, MeshReference> liveMeshes = new HashMap<>();
@@ -60,6 +60,54 @@ public final class LodChunkMeshManager {
         }
         cache.clear();
         liveMeshes.clear();
+        viewport = Set.of();
+    }
+
+    public void setViewport(Collection<LodChunkMesh> meshes) {
+        Set<ChunkLodProcessor.CacheKey> keys = new HashSet<>();
+        for (LodChunkMesh mesh : meshes) keys.add(mesh.key());
+        if (!keys.equals(viewport)) viewport = Set.copyOf(keys);
+    }
+
+    Set<ChunkLodProcessor.CacheKey> viewport() {
+        return viewport;
+    }
+
+    public synchronized long getEstimatedBytes() {
+        return cache.values().stream().mapToLong(LodChunkMeshManager::estimatedBytes).sum();
+    }
+
+    private static long estimatedBytes(LodChunkMesh mesh) {
+        byte[] geometry = mesh.geometry();
+        return 128L + (geometry == null ? 0 : geometry.length);
+    }
+
+    public synchronized long getByteBudget() {
+        return byteBudget;
+    }
+
+    public synchronized void trim(long budget) {
+        byteBudget = budget;
+        long bytes = getEstimatedBytes();
+        var entries = cache.entrySet().iterator();
+        while (bytes > budget && entries.hasNext()) {
+            var entry = entries.next();
+            if (viewport.contains(entry.getKey())) continue;
+            LodChunkMesh mesh = entry.getValue();
+            bytes -= estimatedBytes(mesh);
+            mesh.close();
+            entries.remove();
+        }
+    }
+
+    public synchronized void prune(Predicate<ChunkLodProcessor.CacheKey> keep) {
+        cache.entrySet().removeIf(entry -> {
+            if (keep.test(entry.getKey())) return false;
+            entry.getValue().close();
+            liveMeshes.remove(entry.getKey());
+            return true;
+        });
+        viewport = Set.of();
     }
 
     public synchronized void invalidate(int cx, int cz, int lod, String dimension) {
