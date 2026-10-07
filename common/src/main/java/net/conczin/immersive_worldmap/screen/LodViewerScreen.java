@@ -21,7 +21,8 @@ import net.minecraft.network.chat.Component;
 import net.minecraft.resources.ResourceLocation;
 import net.minecraft.util.FormattedCharSequence;
 import net.minecraft.world.entity.player.PlayerModelPart;
-import net.minecraft.world.level.LightLayer;
+import net.minecraft.world.level.block.LeavesBlock;
+import net.minecraft.world.level.block.state.BlockState;
 import net.minecraft.world.phys.Vec3;
 import org.joml.Matrix4f;
 import org.joml.Vector4f;
@@ -56,7 +57,9 @@ public class LodViewerScreen extends Screen {
         boolean previousCaveView = SharedSettings.caveView;
         int previousBaselineY = SharedSettings.caveViewBaselineY;
         int previousWallHeight = SharedSettings.caveViewWallHeight;
+
         loadState();
+
         if (previousCaveView != SharedSettings.caveView
             || (SharedSettings.caveView && (previousBaselineY != SharedSettings.caveViewBaselineY || previousWallHeight != SharedSettings.caveViewWallHeight))) {
             clearMeshes();
@@ -72,7 +75,6 @@ public class LodViewerScreen extends Screen {
         camera.setTarget((float) minecraft.player.getX(),
                 (float) (minecraft.player.getY() - minecraft.level.getMinBuildHeight()),
                 (float) minecraft.player.getZ());
-        SharedSettings.caveView = minecraft.level.getBrightness(LightLayer.SKY, minecraft.player.blockPosition()) == 0;
         SharedSettings.caveViewBaselineY = (int) Math.floor(minecraft.player.getY()) - minecraft.level.getMinBuildHeight();
 
         BlockPos.MutableBlockPos aboveHead = new BlockPos.MutableBlockPos(minecraft.player.getBlockX(),
@@ -83,6 +85,15 @@ public class LodViewerScreen extends Screen {
             aboveHead.move(0, 1, 0);
         }
         SharedSettings.caveViewWallHeight = airBlocks;
+
+        SharedSettings.caveView = false;
+        for (; aboveHead.getY() < minecraft.level.getMaxBuildHeight(); aboveHead.move(0, 1, 0)) {
+            BlockState state = minecraft.level.getBlockState(aboveHead);
+            if (state.blocksMotion() && !(state.getBlock() instanceof LeavesBlock)) {
+                SharedSettings.caveView = true;
+                break;
+            }
+        }
 
         camera.setZoom(SharedSettings.caveView ? 150f : 225f);
         camera.setRotation(playerFacingYaw ? -minecraft.player.getYRot() : DEFAULT_YAW, SharedSettings.caveView ? -60 : -45f);
