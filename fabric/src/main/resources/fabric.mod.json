@@ -14,10 +14,13 @@
   },
   "license": "${license}",
   "icon": "icon.png",
-  "environment": "client",
+  "environment": "*",
   "entrypoints": {
-    "client": [
+    "main": [
       "net.conczin.immersive_worldmap.ImmersiveWorldmapFabric"
+    ],
+    "client": [
+      "net.conczin.immersive_worldmap.ImmersiveWorldmapClientFabric"
     ]
   },
   "mixins": [

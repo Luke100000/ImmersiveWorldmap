@@ -3,6 +3,7 @@ package net.conczin.immersive_worldmap.screen;
 import com.mojang.blaze3d.systems.RenderSystem;
 import com.mojang.math.Axis;
 import net.conczin.immersive_worldmap.ImmersiveWorldmap;
+import net.conczin.immersive_worldmap.ImmersiveWorldmapClient;
 import net.conczin.immersive_worldmap.database.DatabaseManager;
 import net.conczin.immersive_worldmap.lod.ChunkLodProcessor;
 import net.conczin.immersive_worldmap.renderer.LodChunkMeshManager;
@@ -138,7 +139,7 @@ public class LodViewerScreen extends Screen {
 
     @Override
     public boolean keyPressed(int keyCode, int scanCode, int modifiers) {
-        if (ImmersiveWorldmap.MAP_VIEWER_KEY.matches(keyCode, scanCode)) {
+        if (ImmersiveWorldmapClient.MAP_VIEWER_KEY.matches(keyCode, scanCode)) {
             onClose();
             return true;
         }
@@ -295,7 +296,7 @@ public class LodViewerScreen extends Screen {
                 .append("   ").append(Component.translatable("screen.immersive_worldmap.controls.align_view"))
                 .append("   ").append(Component.translatable("screen.immersive_worldmap.controls.cave_view"))
                 .append("   ").append(Component.translatable("screen.immersive_worldmap.controls.close",
-                        ImmersiveWorldmap.MAP_VIEWER_KEY.getTranslatedKeyMessage()));
+                        ImmersiveWorldmapClient.MAP_VIEWER_KEY.getTranslatedKeyMessage()));
 
         if (minecraft.getDebugOverlay().showDebugScreen()) {
             int tasks = ChunkLodProcessor.getPendingTaskCount() + LodChunkPageManager.INSTANCE.getPendingTaskCount();

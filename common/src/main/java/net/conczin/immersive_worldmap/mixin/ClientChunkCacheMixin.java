@@ -1,7 +1,7 @@
 package net.conczin.immersive_worldmap.mixin;
 
+import net.conczin.immersive_worldmap.ImmersiveWorldmapClient;
 import net.conczin.immersive_worldmap.lod.ChunkLodProcessor;
-import net.conczin.immersive_worldmap.util.ChunkHash;
 import net.minecraft.client.multiplayer.ClientChunkCache;
 import net.minecraft.nbt.CompoundTag;
 import net.minecraft.network.FriendlyByteBuf;
@@ -21,8 +21,8 @@ public class ClientChunkCacheMixin {
     )
     private void onReplaceWithPacketData(int pX, int pZ, FriendlyByteBuf pBuffer, CompoundTag pTag, Consumer<LevelChunk> pConsumer, CallbackInfoReturnable<LevelChunk> cir) {
         LevelChunk chunk = cir.getReturnValue();
-        if (chunk != null) {
-            ChunkLodProcessor.processChunk(chunk, ChunkHash.of(pBuffer));
+        if (chunk != null && ImmersiveWorldmapClient.shouldRecordChunks()) {
+            ChunkLodProcessor.processChunk(chunk, chunk.getLevel());
         }
     }
 }

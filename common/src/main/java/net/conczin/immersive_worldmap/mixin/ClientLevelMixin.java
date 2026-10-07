@@ -1,5 +1,6 @@
 package net.conczin.immersive_worldmap.mixin;
 
+import net.conczin.immersive_worldmap.ImmersiveWorldmapClient;
 import net.conczin.immersive_worldmap.lod.ChunkLodProcessor;
 import net.minecraft.client.multiplayer.ClientLevel;
 import net.minecraft.core.BlockPos;
@@ -25,6 +26,8 @@ public class ClientLevelMixin {
 
     @Inject(method = "setBlocksDirty", at = @At("HEAD"))
     private void onBlockChanged(BlockPos pos, BlockState oldState, BlockState newState, CallbackInfo ci) {
+        if (!ImmersiveWorldmapClient.shouldRecordChunks()) return;
+
         ChunkPos chunkPos = new ChunkPos(pos);
         immersiveWorldmap$dirtyChunks.remove(chunkPos);
         immersiveWorldmap$dirtyChunks.put(chunkPos, System.nanoTime());
@@ -32,6 +35,8 @@ public class ClientLevelMixin {
 
     @Inject(method = "tick", at = @At("TAIL"))
     private void onTick(BooleanSupplier hasTimeLeft, CallbackInfo ci) {
+        if (!ImmersiveWorldmapClient.shouldRecordChunks()) return;
+
         Iterator<Map.Entry<ChunkPos, Long>> iterator = immersiveWorldmap$dirtyChunks.entrySet().iterator();
         if (!iterator.hasNext()) {
             return;
@@ -51,7 +56,7 @@ public class ClientLevelMixin {
 
     @Inject(method = "unload", at = @At("HEAD"))
     private void onUnload(LevelChunk chunk, CallbackInfo ci) {
-        if (immersiveWorldmap$dirtyChunks.remove(chunk.getPos()) != null) {
+        if (ImmersiveWorldmapClient.shouldRecordChunks() && immersiveWorldmap$dirtyChunks.remove(chunk.getPos()) != null) {
             ChunkLodProcessor.processChunk(chunk);
         }
     }

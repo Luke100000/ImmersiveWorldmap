@@ -120,9 +120,9 @@ public class ChunkLodDatabase implements AutoCloseable {
      * @param colors    the binary color data
      * @throws SQLException if a database access error occurs
      */
-    public void upsertChunk(int x, int z, String dimension, int lod, byte[] colors, int minSurface, long packetHash) throws SQLException {
+    public void upsertChunk(int x, int z, String dimension, int lod, byte[] colors, int minSurface, long chunkHash) throws SQLException {
         inTransaction(connection -> {
-            upsertChunkRow(connection, x, z, dimension, lod, colors, minSurface, packetHash);
+            upsertChunkRow(connection, x, z, dimension, lod, colors, minSurface, chunkHash);
             markParentsDirty(connection, x, z, dimension, lod);
         });
     }
@@ -141,7 +141,7 @@ public class ChunkLodDatabase implements AutoCloseable {
         }
     }
 
-    private void upsertChunkRow(Connection connection, int x, int z, String dimension, int lod, byte[] colors, int minSurface, long packetHash) throws SQLException {
+    private void upsertChunkRow(Connection connection, int x, int z, String dimension, int lod, byte[] colors, int minSurface, long chunkHash) throws SQLException {
         String sql = """
                 INSERT INTO chunk_lod (x, z, dimension, lod, colors, min_surface, empty, dirty, hash)
                 VALUES (?, ?, ?, ?, ?, ?, ?, 0, ?)
@@ -159,7 +159,7 @@ public class ChunkLodDatabase implements AutoCloseable {
         pstmt.setString(3, dimension);
         pstmt.setInt(4, lod);
         pstmt.setInt(6, minSurface);
-        pstmt.setLong(8, packetHash);
+        pstmt.setLong(8, chunkHash);
         if (colors == null) {
             pstmt.setNull(5, Types.BLOB);
             pstmt.setBoolean(7, true);
@@ -228,7 +228,7 @@ public class ChunkLodDatabase implements AutoCloseable {
     }
 
 
-    public Long getPacketHash(int x, int z, String dimension, int lod) throws SQLException {
+    public Long getChunkHash(int x, int z, String dimension, int lod) throws SQLException {
         Connection connection = getConnection();
         String sql = "SELECT hash FROM chunk_lod WHERE x = ? AND z = ? AND dimension = ? AND lod = ?";
         PreparedStatement pstmt = prepare(connection, sql);
