@@ -1,5 +1,7 @@
 package net.conczin.immersive_worldmap.renderer;
 
+import it.unimi.dsi.fastutil.objects.Object2IntOpenHashMap;
+import it.unimi.dsi.fastutil.objects.Object2ObjectOpenHashMap;
 import it.unimi.dsi.fastutil.objects.ObjectOpenHashSet;
 import net.conczin.immersive_worldmap.lod.ChunkLodProcessor;
 import net.conczin.immersive_worldmap.lod.LodChunkData;
@@ -15,6 +17,7 @@ public final class LodChunkMeshManager {
 
     public static void tick() {
         TickLruCache.tick();
+        INSTANCE.removeCollectedMeshes();
     }
 
     private final Map<ChunkLodProcessor.CacheKey, LodChunkMesh> cache = new LinkedHashMap<>(256, 0.75f, true);
@@ -22,7 +25,8 @@ public final class LodChunkMeshManager {
     private long byteBudget = 128L * 1024 * 1024;
 
     // Cache eviction must not duplicate meshes still held by a page, selection, or pending build.
-    private final Map<ChunkLodProcessor.CacheKey, MeshReference> liveMeshes = new HashMap<>();
+    private final Map<ChunkLodProcessor.CacheKey, MeshReference> liveMeshes = new Object2ObjectOpenHashMap<>();
+    private final Object2IntOpenHashMap<ChunkLodProcessor.CacheKey> finerGeometry = new Object2IntOpenHashMap<>();
     private final ReferenceQueue<LodChunkMesh> collectedMeshes = new ReferenceQueue<>();
 
     public synchronized LodChunkMesh get(int cx, int cz, int lod, String dimension) {
@@ -37,6 +41,9 @@ public final class LodChunkMeshManager {
         MeshReference reference = liveMeshes.get(key);
         LodChunkMesh mesh = reference == null ? null : reference.get();
         if (mesh == null) {
+            if (reference != null) {
+                updateAvailability(reference, false);
+            }
             mesh = new LodChunkMesh(key);
             liveMeshes.put(key, new MeshReference(key, mesh, collectedMeshes));
         }
@@ -61,6 +68,22 @@ public final class LodChunkMeshManager {
         }
     }
 
+    synchronized LodChunkMesh find(ChunkLodProcessor.CacheKey key) {
+        MeshReference reference = liveMeshes.get(key);
+        return reference == null ? null : reference.get();
+    }
+
+    synchronized boolean hasFinerGeometry(ChunkLodProcessor.CacheKey key) {
+        return finerGeometry.containsKey(key);
+    }
+
+    synchronized void geometryChanged(LodChunkMesh mesh) {
+        MeshReference reference = liveMeshes.get(mesh.key());
+        if (reference != null && reference.get() == mesh) {
+            updateAvailability(reference, mesh.geometry() != null);
+        }
+    }
+
     synchronized void retain(LodChunkMesh mesh) {
         cache.putIfAbsent(mesh.key(), mesh);
     }
@@ -72,6 +95,7 @@ public final class LodChunkMeshManager {
         }
         cache.clear();
         liveMeshes.clear();
+        finerGeometry.clear();
         viewport = Set.of();
     }
 
@@ -107,6 +131,7 @@ public final class LodChunkMeshManager {
         while (bytes > budget && entries.hasNext()) {
             var entry = entries.next();
             if (viewport.contains(entry.getKey())) continue;
+
             LodChunkMesh mesh = entry.getValue();
             bytes -= estimatedBytes(mesh);
             mesh.close();
@@ -115,12 +140,12 @@ public final class LodChunkMeshManager {
     }
 
     public synchronized void prune(Predicate<ChunkLodProcessor.CacheKey> keep) {
-        cache.entrySet().removeIf(entry -> {
-            if (keep.test(entry.getKey())) return false;
-            entry.getValue().close();
-            liveMeshes.remove(entry.getKey());
-            return true;
-        });
+        for (LodChunkMesh mesh : meshes()) {
+            if (keep.test(mesh.key())) continue;
+            mesh.close();
+            cache.remove(mesh.key());
+            liveMeshes.remove(mesh.key());
+        }
         viewport = Set.of();
     }
 
@@ -140,15 +165,35 @@ public final class LodChunkMeshManager {
         }
     }
 
-    private void removeCollectedMeshes() {
+    private synchronized void removeCollectedMeshes() {
         MeshReference reference;
         while ((reference = (MeshReference) collectedMeshes.poll()) != null) {
-            liveMeshes.remove(reference.key, reference);
+            if (liveMeshes.remove(reference.key, reference)) {
+                updateAvailability(reference, false);
+            }
+        }
+    }
+
+    private void updateAvailability(MeshReference reference, boolean hasGeometry) {
+        if (reference.hasGeometry == hasGeometry) return;
+
+        reference.hasGeometry = hasGeometry;
+        ChunkLodProcessor.CacheKey key = reference.key;
+        for (int lod = key.lod() + 1; lod <= LodChunkData.MAX_LOD; lod++) {
+            key = new ChunkLodProcessor.CacheKey(Math.floorDiv(key.chunkX(), 2), Math.floorDiv(key.chunkZ(), 2), key.dimension(), lod);
+
+            int count = finerGeometry.getInt(key) + (hasGeometry ? 1 : -1);
+            if (count == 0) {
+                finerGeometry.removeInt(key);
+            } else {
+                finerGeometry.put(key, count);
+            }
         }
     }
 
     private static final class MeshReference extends WeakReference<LodChunkMesh> {
         final ChunkLodProcessor.CacheKey key;
+        boolean hasGeometry;
 
         MeshReference(ChunkLodProcessor.CacheKey key, LodChunkMesh mesh, ReferenceQueue<LodChunkMesh> queue) {
             super(mesh, queue);

@@ -1,6 +1,5 @@
 package net.conczin.immersive_worldmap.renderer;
 
-import it.unimi.dsi.fastutil.objects.Object2ObjectOpenHashMap;
 import it.unimi.dsi.fastutil.objects.ObjectLinkedOpenHashSet;
 import it.unimi.dsi.fastutil.objects.ObjectOpenHashSet;
 import net.conczin.immersive_worldmap.lod.ChunkLodProcessor;
@@ -19,7 +18,9 @@ public class LodChunkVisibilitySelector {
     private static LodChunkVisibilitySelector INSTANCE;
 
     public static LodChunkVisibilitySelector get() {
-        if (INSTANCE == null) INSTANCE = new LodChunkVisibilitySelector();
+        if (INSTANCE == null) {
+            INSTANCE = new LodChunkVisibilitySelector();
+        }
         return INSTANCE;
     }
 
@@ -37,7 +38,7 @@ public class LodChunkVisibilitySelector {
     private static final double LOD_HYSTERESIS = 0.05;
     private static final float POSITION_STEP = 1f / 16f;
     private static final float ANGLE_STEP = 1f / 64f;
-    private static final long REFRESH_NANOS = 50_000_000L;
+    private static final long REFRESH_NANOS = 200_000_000L;
 
     private record View(String dimension, int height, float x, float y, float z, float yaw, float pitch, float zoom,
                         float aspect, float radius) {
@@ -63,9 +64,6 @@ public class LodChunkVisibilitySelector {
     private int targetLod = -1;
     private String selectedDimension;
 
-    private final List<LodChunkMesh> meshSnapshot = new ArrayList<>();
-    private final Map<ChunkLodProcessor.CacheKey, LodChunkMesh> cachedMeshes = new Object2ObjectOpenHashMap<>();
-    private final Set<ChunkLodProcessor.CacheKey> finerBranches = new ObjectOpenHashSet<>();
     private final Set<ChunkLodProcessor.CacheKey> taskInterest = new ObjectOpenHashSet<>();
 
     public record Selection(List<Node> roots) {
@@ -144,19 +142,6 @@ public class LodChunkVisibilitySelector {
             List<Node> roots = new ArrayList<>();
             List<LodChunkMesh> targetMeshes = new ArrayList<>();
             int targetLod = selectLod(snapshot);
-            LodChunkMeshManager.INSTANCE.copyMeshesTo(meshSnapshot);
-            for (LodChunkMesh mesh : meshSnapshot) {
-                if (mesh.dimension.equals(snapshot.dimension())) {
-                    cachedMeshes.put(mesh.key(), mesh);
-                    if (mesh.geometry() == null) continue;
-                    for (int lod = mesh.lod + 1; lod <= targetLod; lod++) {
-                        int scale = 1 << (lod - mesh.lod);
-                        finerBranches.add(new ChunkLodProcessor.CacheKey(Math.floorDiv(mesh.chunkX, scale),
-                                Math.floorDiv(mesh.chunkZ, scale), mesh.dimension, lod));
-                    }
-                }
-            }
-
             FrustumIntersection frustum = new FrustumIntersection(snapshot.viewProjection());
             double radius = snapshot.radius() + 1;
             float rootWorldSize = worldSize(LodChunkData.MAX_LOD);
@@ -168,7 +153,7 @@ public class LodChunkVisibilitySelector {
             while (running && iterator.hasNext()) {
                 int[] root = iterator.next();
                 Node node = visit(root[0], root[1], LodChunkData.MAX_LOD, targetLod, radius, snapshot, frustum,
-                        cachedMeshes, finerBranches, targetMeshes);
+                        targetMeshes);
                 if (node != null) roots.add(node);
             }
 
@@ -191,9 +176,6 @@ public class LodChunkVisibilitySelector {
 
             return result;
         } finally {
-            meshSnapshot.clear();
-            cachedMeshes.clear();
-            finerBranches.clear();
             taskInterest.clear();
         }
     }
@@ -227,8 +209,6 @@ public class LodChunkVisibilitySelector {
             double radius,
             CameraSnapshot snapshot,
             FrustumIntersection frustum,
-            Map<ChunkLodProcessor.CacheKey, LodChunkMesh> cachedMeshes,
-            Set<ChunkLodProcessor.CacheKey> finerBranches,
             List<LodChunkMesh> targetMeshes
     ) {
         float size = worldSize(lod);
@@ -237,12 +217,14 @@ public class LodChunkVisibilitySelector {
         }
 
         ChunkLodProcessor.CacheKey key = new ChunkLodProcessor.CacheKey(chunkX, chunkZ, snapshot.dimension(), lod);
-        LodChunkMesh mesh = cachedMeshes.get(key);
+        LodChunkMesh mesh;
         if (lod == targetLod) {
             mesh = LodChunkMeshManager.INSTANCE.get(chunkX, chunkZ, lod, snapshot.dimension());
             targetMeshes.add(mesh);
+        } else {
+            mesh = LodChunkMeshManager.INSTANCE.find(key);
         }
-        if (lod <= targetLod && !finerBranches.contains(key)) {
+        if (lod <= targetLod && !LodChunkMeshManager.INSTANCE.hasFinerGeometry(key)) {
             return new Node(mesh, true, null);
         }
 
@@ -252,7 +234,7 @@ public class LodChunkVisibilitySelector {
         for (int x = 0; x < 2; x++) {
             for (int z = 0; z < 2; z++) {
                 Node child = visit(childX + x, childZ + z, lod - 1, targetLod, radius,
-                        snapshot, frustum, cachedMeshes, finerBranches, targetMeshes);
+                        snapshot, frustum, targetMeshes);
                 if (child != null) children.add(child);
             }
         }

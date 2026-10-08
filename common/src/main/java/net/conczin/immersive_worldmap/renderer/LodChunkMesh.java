@@ -76,6 +76,7 @@ public class LodChunkMesh {
                 requested = false;
             }
             if (accepted) {
+                LodChunkMeshManager.INSTANCE.geometryChanged(this);
                 LodChunkPageManager.INSTANCE.offer(this, result);
             }
         }));
@@ -94,11 +95,14 @@ public class LodChunkMesh {
         if (geometry != null && geometry.length > 0) loaded = false;
     }
 
-    public synchronized void close() {
-        revision++;
-        geometry = null;
-        dirty = true;
-        requested = false;
-        loaded = false;
+    public void close() {
+        synchronized (this) {
+            revision++;
+            geometry = null;
+            dirty = true;
+            requested = false;
+            loaded = false;
+        }
+        LodChunkMeshManager.INSTANCE.geometryChanged(this);
     }
 }
