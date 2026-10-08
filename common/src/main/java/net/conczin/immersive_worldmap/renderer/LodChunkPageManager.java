@@ -2,7 +2,8 @@ package net.conczin.immersive_worldmap.renderer;
 
 import com.mojang.blaze3d.systems.RenderSystem;
 import com.mojang.blaze3d.vertex.*;
-import net.conczin.immersive_worldmap.ImmersiveWorldmap;
+import it.unimi.dsi.fastutil.HashCommon;
+import it.unimi.dsi.fastutil.objects.ObjectOpenHashSet;
 import net.conczin.immersive_worldmap.lod.ChunkLodProcessor;
 import net.conczin.immersive_worldmap.screen.MapBackgroundTexture;
 import net.conczin.immersive_worldmap.util.PriorityThreadPoolExecutor;
@@ -30,6 +31,7 @@ public final class LodChunkPageManager {
     private static final int VERTEX_SIZE = DefaultVertexFormat.POSITION_COLOR.getVertexSize();
     private static final int QUAD_SIZE = 4 * VERTEX_SIZE;
     private static final int MAX_UPLOADS_PER_FRAME = 1;
+    private static final long PRUNE_INTERVAL_NANOS = 200_000_000L;
 
     public static final LodChunkPageManager INSTANCE = new LodChunkPageManager();
 
@@ -42,7 +44,12 @@ public final class LodChunkPageManager {
     private long generation;
     private volatile boolean active;
     private volatile long assemblingBytes;
-    private Set<ChunkLodProcessor.CacheKey> previousViewport = Set.of();
+
+    private final Set<ChunkLodProcessor.CacheKey> pruningViewport = new ObjectOpenHashSet<>();
+    private final Set<PageKey> neededPages = new ObjectOpenHashSet<>();
+    private final List<LodChunkMesh> previousVisible = new ArrayList<>();
+    private Set<ChunkLodProcessor.CacheKey> previousViewport;
+    private long lastPruneNanos;
 
     private LodChunkPageManager() {
     }
@@ -142,7 +149,12 @@ public final class LodChunkPageManager {
         buildExecutor.getQueue().clear();
         uploadQueue.clear();
         gpuBytes = 0;
-        previousViewport = Set.of();
+
+        pruningViewport.clear();
+        neededPages.clear();
+        previousVisible.clear();
+        previousViewport = null;
+        lastPruneNanos = 0;
     }
 
     private static PageKey key(LodChunkMesh chunk) {
@@ -154,17 +166,11 @@ public final class LodChunkPageManager {
         Snapshot snapshot = page.snapshot();
         if (snapshot == null) return;
 
-        PageBuild build;
         try {
-            build = assemble(snapshot);
-        } catch (Throwable error) {
-            ImmersiveWorldmap.LOGGER.error("Failed to build LOD page {}", page.key, error);
-            page.buildFailed(snapshot.revision);
+            page.built(assemble(snapshot));
+        } finally {
             assemblingBytes = 0;
-            return;
         }
-        page.built(build);
-        assemblingBytes = 0;
     }
 
     private PageBuild assemble(Snapshot snapshot) {
@@ -218,39 +224,51 @@ public final class LodChunkPageManager {
                 long oldBytes = page.gpuBytes;
                 page.install(build);
                 gpuBytes += page.gpuBytes - oldBytes;
-            } catch (Throwable error) {
-                ImmersiveWorldmap.LOGGER.error("Failed to upload LOD page {}", page.key, error);
-                page.buildFailed(build.snapshot.revision);
             }
         }
     }
 
     private void pruneUnusedPages(List<LodChunkMesh> visible) {
-        Set<ChunkLodProcessor.CacheKey> viewport = new HashSet<>(LodChunkMeshManager.INSTANCE.viewport());
-        for (LodChunkMesh mesh : visible) {
-            viewport.add(mesh.key());
+        long now = System.nanoTime();
+        if (previousViewport != null && now - lastPruneNanos < PRUNE_INTERVAL_NANOS) return;
+        lastPruneNanos = now;
+
+        Set<ChunkLodProcessor.CacheKey> viewport = LodChunkMeshManager.INSTANCE.viewport();
+        boolean changed = viewport != previousViewport || !previousVisible.equals(visible);
+        if (changed) {
+            pruningViewport.clear();
+            pruningViewport.addAll(viewport);
+            for (LodChunkMesh mesh : visible) pruningViewport.add(mesh.key());
+
+            neededPages.clear();
+            for (ChunkLodProcessor.CacheKey key : pruningViewport) {
+                neededPages.add(new PageKey(key.dimension(), key.lod(),
+                        Math.floorDiv(key.chunkX(), PAGE_SIZE), Math.floorDiv(key.chunkZ(), PAGE_SIZE)));
+            }
+            previousViewport = viewport;
+            previousVisible.clear();
+            previousVisible.addAll(visible);
         }
 
-        Set<PageKey> needed = new HashSet<>();
-        for (ChunkLodProcessor.CacheKey key : viewport) {
-            needed.add(new PageKey(key.dimension(), key.lod(), Math.floorDiv(key.chunkX(), PAGE_SIZE), Math.floorDiv(key.chunkZ(), PAGE_SIZE)));
-        }
-
-        boolean changed = !viewport.equals(previousViewport);
         for (Page page : pages.values()) {
-            if (page.lastDrawFrame != frame && !needed.contains(page.key)) {
+            if (page.lastDrawFrame != frame && !neededPages.contains(page.key)) {
                 if (pages.remove(page.key, page)) {
                     gpuBytes -= page.gpuBytes;
                     page.close();
                 }
             } else if (changed) {
-                page.prune(viewport);
+                page.prune(pruningViewport);
             }
         }
-        previousViewport = viewport;
     }
 
     private record PageKey(String dimension, int lod, int x, int z) {
+        @Override
+        public int hashCode() {
+            long coordinates = ((long) x << 32) | (z & 0xffffffffL);
+            int hash = HashCommon.long2int(HashCommon.mix(coordinates));
+            return 31 * (31 * hash + Objects.hashCode(dimension)) + lod;
+        }
     }
 
     private record Snapshot(long revision, LodChunkMesh[] chunks, byte[][] geometry) {
@@ -369,11 +387,6 @@ public final class LodChunkPageManager {
                 return null;
             }
             return result;
-        }
-
-        synchronized void buildFailed(long failedRevision) {
-            building = false;
-            if (revision != failedRevision) queueBuild();
         }
 
         synchronized void install(PageBuild build) {

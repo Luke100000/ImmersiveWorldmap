@@ -1,5 +1,6 @@
 package net.conczin.immersive_worldmap.renderer;
 
+import it.unimi.dsi.fastutil.objects.ObjectOpenHashSet;
 import net.conczin.immersive_worldmap.lod.ChunkLodProcessor;
 import net.conczin.immersive_worldmap.lod.LodChunkData;
 import net.conczin.immersive_worldmap.util.TickLruCache;
@@ -26,31 +27,42 @@ public final class LodChunkMeshManager {
 
     public synchronized LodChunkMesh get(int cx, int cz, int lod, String dimension) {
         removeCollectedMeshes();
+
         ChunkLodProcessor.CacheKey key = new ChunkLodProcessor.CacheKey(cx, cz, dimension, lod);
         LodChunkMesh existing = cache.get(key);
-        if (existing != null) return existing;
+        if (existing != null) {
+            return existing;
+        }
+
         MeshReference reference = liveMeshes.get(key);
         LodChunkMesh mesh = reference == null ? null : reference.get();
         if (mesh == null) {
-            mesh = new LodChunkMesh(cx, cz, lod, dimension);
+            mesh = new LodChunkMesh(key);
             liveMeshes.put(key, new MeshReference(key, mesh, collectedMeshes));
         }
-        cache.put(key, mesh);
+
+        cache.put(mesh.key(), mesh);
+
         return mesh;
     }
 
     public synchronized List<LodChunkMesh> meshes() {
-        removeCollectedMeshes();
         List<LodChunkMesh> meshes = new ArrayList<>(liveMeshes.size());
+        copyMeshesTo(meshes);
+        return meshes;
+    }
+
+    synchronized void copyMeshesTo(List<LodChunkMesh> meshes) {
+        removeCollectedMeshes();
+        meshes.clear();
         for (MeshReference reference : liveMeshes.values()) {
             LodChunkMesh mesh = reference.get();
             if (mesh != null) meshes.add(mesh);
         }
-        return meshes;
     }
 
     synchronized void retain(LodChunkMesh mesh) {
-        cache.putIfAbsent(new ChunkLodProcessor.CacheKey(mesh.chunkX, mesh.chunkZ, mesh.dimension, mesh.lod), mesh);
+        cache.putIfAbsent(mesh.key(), mesh);
     }
 
     public synchronized void clear() {
@@ -64,9 +76,11 @@ public final class LodChunkMeshManager {
     }
 
     public void setViewport(Collection<LodChunkMesh> meshes) {
-        Set<ChunkLodProcessor.CacheKey> keys = new HashSet<>();
+        Set<ChunkLodProcessor.CacheKey> keys = new ObjectOpenHashSet<>(meshes.size());
         for (LodChunkMesh mesh : meshes) keys.add(mesh.key());
-        if (!keys.equals(viewport)) viewport = Set.copyOf(keys);
+        if (!keys.equals(viewport)) {
+            viewport = Collections.unmodifiableSet(keys);
+        }
     }
 
     Set<ChunkLodProcessor.CacheKey> viewport() {

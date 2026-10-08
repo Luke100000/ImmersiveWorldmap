@@ -45,9 +45,14 @@ public class ChunkLodDatabase implements AutoCloseable {
                 statement.execute("PRAGMA journal_mode=WAL");
             }
             initializeSchema(connection);
-        } catch (SQLException e) {
-            throw new RuntimeException("Failed to initialize database at " + databasePath, e);
+        } catch (SQLException error) {
+            closed = true;
+            ImmersiveWorldmap.LOGGER.error("Failed to initialize database at {}", databasePath, error);
         }
+    }
+
+    boolean isClosed() {
+        return closed;
     }
 
     private Connection getConnection() throws SQLException {
@@ -81,6 +86,7 @@ public class ChunkLodDatabase implements AutoCloseable {
     }
 
     private PreparedStatement prepare(Connection connection, String sql) throws SQLException {
+        // TODO: Evict invalidated statements so SQL failures cannot permanently break recording on this connection.
         Map<String, PreparedStatement> statements = threadStatements.get();
         PreparedStatement statement = statements.get(sql);
         if (statement == null || statement.isClosed()) {
@@ -128,16 +134,28 @@ public class ChunkLodDatabase implements AutoCloseable {
     }
 
     private void inTransaction(Transaction transaction) throws SQLException {
+        // TODO: Retire connections after failed rollback to prevent committing partial chunk/parent updates.
         Connection connection = getConnection();
         connection.setAutoCommit(false);
+        Throwable failure = null;
         try {
             transaction.run(connection);
             connection.commit();
-        } catch (SQLException | RuntimeException e) {
-            connection.rollback();
+        } catch (SQLException | RuntimeException | Error e) {
+            failure = e;
+            try {
+                connection.rollback();
+            } catch (SQLException rollbackError) {
+                e.addSuppressed(rollbackError);
+            }
             throw e;
         } finally {
-            connection.setAutoCommit(true);
+            try {
+                connection.setAutoCommit(true);
+            } catch (SQLException resetError) {
+                if (failure == null) throw resetError;
+                failure.addSuppressed(resetError);
+            }
         }
     }
 
@@ -196,7 +214,7 @@ public class ChunkLodDatabase implements AutoCloseable {
      * @param z         the z coordinate
      * @param dimension the dimension identifier
      * @param lod       the level of detail
-     * @return the stored record; colors are null for empty or missing chunks
+     * @return the stored record; colors are null for empty, missing, or dirty chunks
      * @throws SQLException if a database access error occurs
      */
     public StoredChunk loadChunk(int x, int z, String dimension, int lod) throws SQLException {
@@ -214,14 +232,18 @@ public class ChunkLodDatabase implements AutoCloseable {
 
         try (ResultSet rs = pstmt.executeQuery()) {
             if (!rs.next()) return new StoredChunk(false, null, false, 0);
+            dirty = rs.getBoolean("dirty");
+            minSurface = rs.getInt("min_surface");
+            if (dirty) {
+                return new StoredChunk(true, null, true, minSurface);
+            }
+
             byte[] compressed = rs.getBytes("colors");
             try {
                 colors = compressed == null ? null : CompressionUtil.decompress(compressed);
             } catch (RuntimeException e) {
                 throw new SQLException("Invalid chunk data at " + x + ", " + z + " in " + dimension + " (LOD " + lod + ")", e);
             }
-            dirty = rs.getBoolean("dirty");
-            minSurface = rs.getInt("min_surface");
         }
 
         return new StoredChunk(true, colors, dirty, minSurface);
@@ -283,7 +305,8 @@ public class ChunkLodDatabase implements AutoCloseable {
             pstmt.setString(1, dimension);
             pstmt.executeUpdate();
         } catch (SQLException e) {
-            ImmersiveWorldmap.LOGGER.error("Failed to clear LOD data for {}: {}", dimension, sql, e);
+            threadStatements.get().remove(sql);
+            ImmersiveWorldmap.LOGGER.error("Failed to clear LOD data for {}", dimension, e);
         }
     }
 
@@ -294,8 +317,8 @@ public class ChunkLodDatabase implements AutoCloseable {
             for (PreparedStatement statement : openStatements) {
                 try {
                     statement.close();
-                } catch (SQLException ignored) {
-                    // The owning connection is closed below.
+                } catch (SQLException error) {
+                    ImmersiveWorldmap.LOGGER.error("Failed to close database statement", error);
                 }
             }
 
@@ -316,7 +339,7 @@ public class ChunkLodDatabase implements AutoCloseable {
             threadConnection.remove();
 
             if (failure != null) {
-                throw new RuntimeException("Failed to close database connections", failure);
+                ImmersiveWorldmap.LOGGER.error("Failed to close database connections", failure);
             }
         }
     }

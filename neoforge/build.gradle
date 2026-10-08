@@ -23,7 +23,7 @@ neoForge {
     }
     runs {
         configureEach {
-            project.dependencies.add(additionalRuntimeClasspathConfiguration.name, "org.xerial:sqlite-jdbc:3.45.2.0")
+            project.dependencies.add(additionalRuntimeClasspathConfiguration.name, "org.xerial:sqlite-jdbc:3.51.3.0")
             ideName = "NeoForge ${it.name.capitalize()} (${project.path})" // Unify the run config names with fabric
         }
         client {
@@ -44,10 +44,10 @@ neoForge {
 }
 
 dependencies {
-    jarJar(implementation("org.xerial:sqlite-jdbc:3.45.2.0")) {
+    jarJar(implementation("org.xerial:sqlite-jdbc:3.51.3.0")) {
         version {
-            strictly '[3.45.2.0,4.0)'
-            prefer '3.45.2.0'
+            strictly '[3.51.3.0,4.0)'
+            prefer '3.51.3.0'
         }
     }
     runtimeOnly "maven.modrinth:chunky:${chunky_neoforge_version}"

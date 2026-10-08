@@ -6,6 +6,7 @@ import net.conczin.immersive_worldmap.lod.LodChunkData;
 import net.conczin.immersive_worldmap.settings.SharedSettings;
 import net.conczin.immersive_worldmap.util.ColorManager;
 import net.conczin.immersive_worldmap.util.TesselatorPool;
+import net.conczin.immersive_worldmap.util.ThreadPoolUtil;
 
 import java.util.Arrays;
 import java.util.concurrent.CompletableFuture;
@@ -35,7 +36,7 @@ public class LodChunkMeshBuilder {
     @SuppressWarnings("DuplicatedCode")
     public static CompletableFuture<byte[]> buildMeshAsync(int chunkX, int chunkZ, String dimension, int lod) {
         CompletableFuture<LodChunkData> center = ChunkLodProcessor.getLodChunkDataAsync(chunkX, chunkZ, dimension, lod);
-        return center.thenCompose(centerData -> {
+        return ThreadPoolUtil.failOnError(center.thenCompose(centerData -> {
             if (centerData.empty()) {
                 return CompletableFuture.completedFuture(EMPTY);
             }
@@ -52,7 +53,7 @@ public class LodChunkMeshBuilder {
                     ChunkLodProcessor.EXECUTOR.submit(lod, new ChunkLodProcessor.CacheKey(chunkX, chunkZ, dimension, lod),
                             () -> buildMesh(new ChunkNeighborhood(centerData, north.join(), south.join(), west.join(), east.join(),
                                     northWest.join(), northEast.join(), southWest.join(), southEast.join()), lod)));
-        });
+        }));
     }
 
     @SuppressWarnings("DuplicatedCode")

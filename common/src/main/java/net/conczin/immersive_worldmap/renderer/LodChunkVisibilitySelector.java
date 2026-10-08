@@ -1,8 +1,12 @@
 package net.conczin.immersive_worldmap.renderer;
 
+import it.unimi.dsi.fastutil.objects.Object2ObjectOpenHashMap;
+import it.unimi.dsi.fastutil.objects.ObjectLinkedOpenHashSet;
+import it.unimi.dsi.fastutil.objects.ObjectOpenHashSet;
 import net.conczin.immersive_worldmap.lod.ChunkLodProcessor;
 import net.conczin.immersive_worldmap.lod.LodChunkData;
 import net.conczin.immersive_worldmap.util.CircularChunkIterator;
+import net.conczin.immersive_worldmap.util.ThreadPoolUtil;
 import org.joml.FrustumIntersection;
 import org.joml.Matrix4f;
 
@@ -59,6 +63,11 @@ public class LodChunkVisibilitySelector {
     private int targetLod = -1;
     private String selectedDimension;
 
+    private final List<LodChunkMesh> meshSnapshot = new ArrayList<>();
+    private final Map<ChunkLodProcessor.CacheKey, LodChunkMesh> cachedMeshes = new Object2ObjectOpenHashMap<>();
+    private final Set<ChunkLodProcessor.CacheKey> finerBranches = new ObjectOpenHashSet<>();
+    private final Set<ChunkLodProcessor.CacheKey> taskInterest = new ObjectOpenHashSet<>();
+
     public record Selection(List<Node> roots) {
         public List<LodChunkMesh> select(Predicate<LodChunkMesh> ready) {
             List<LodChunkMesh> selected = new ArrayList<>();
@@ -95,6 +104,10 @@ public class LodChunkVisibilitySelector {
     private LodChunkVisibilitySelector() {
         worker = new Thread(this::workerLoop, "ImmersiveWorldmap-LodSelection");
         worker.setDaemon(true);
+        worker.setUncaughtExceptionHandler((thread, error) -> {
+            running = false;
+            ThreadPoolUtil.crash(thread, error);
+        });
         worker.start();
     }
 
@@ -127,56 +140,62 @@ public class LodChunkVisibilitySelector {
     }
 
     private Selection buildSelection(CameraSnapshot snapshot) {
-        List<Node> roots = new ArrayList<>();
-        List<LodChunkMesh> targetMeshes = new ArrayList<>();
-        Map<ChunkLodProcessor.CacheKey, LodChunkMesh> cachedMeshes = new HashMap<>();
-        Set<ChunkLodProcessor.CacheKey> finerBranches = new HashSet<>();
-        int targetLod = selectLod(snapshot);
-        for (LodChunkMesh mesh : LodChunkMeshManager.INSTANCE.meshes()) {
-            if (mesh.dimension.equals(snapshot.dimension())) {
-                cachedMeshes.put(new ChunkLodProcessor.CacheKey(mesh.chunkX, mesh.chunkZ, mesh.dimension, mesh.lod), mesh);
-                if (mesh.geometry() == null) continue;
-                for (int lod = mesh.lod + 1; lod <= targetLod; lod++) {
-                    int scale = 1 << (lod - mesh.lod);
-                    finerBranches.add(new ChunkLodProcessor.CacheKey(Math.floorDiv(mesh.chunkX, scale),
-                            Math.floorDiv(mesh.chunkZ, scale), mesh.dimension, lod));
+        try {
+            List<Node> roots = new ArrayList<>();
+            List<LodChunkMesh> targetMeshes = new ArrayList<>();
+            int targetLod = selectLod(snapshot);
+            LodChunkMeshManager.INSTANCE.copyMeshesTo(meshSnapshot);
+            for (LodChunkMesh mesh : meshSnapshot) {
+                if (mesh.dimension.equals(snapshot.dimension())) {
+                    cachedMeshes.put(mesh.key(), mesh);
+                    if (mesh.geometry() == null) continue;
+                    for (int lod = mesh.lod + 1; lod <= targetLod; lod++) {
+                        int scale = 1 << (lod - mesh.lod);
+                        finerBranches.add(new ChunkLodProcessor.CacheKey(Math.floorDiv(mesh.chunkX, scale),
+                                Math.floorDiv(mesh.chunkZ, scale), mesh.dimension, lod));
+                    }
                 }
             }
+
+            FrustumIntersection frustum = new FrustumIntersection(snapshot.viewProjection());
+            double radius = snapshot.radius() + 1;
+            float rootWorldSize = worldSize(LodChunkData.MAX_LOD);
+            int centerX = (int) Math.floor(snapshot.focusX() / rootWorldSize);
+            int centerZ = (int) Math.floor(snapshot.focusZ() / rootWorldSize);
+            int rootRadius = (int) Math.ceil(radius / rootWorldSize) + 1;
+
+            CircularChunkIterator iterator = new CircularChunkIterator(centerX, centerZ, rootRadius);
+            while (running && iterator.hasNext()) {
+                int[] root = iterator.next();
+                Node node = visit(root[0], root[1], LodChunkData.MAX_LOD, targetLod, radius, snapshot, frustum,
+                        cachedMeshes, finerBranches, targetMeshes);
+                if (node != null) roots.add(node);
+            }
+
+            Selection result = new Selection(List.copyOf(roots));
+            List<LodChunkMesh> selected = result.select(LodChunkMesh::isLoaded);
+            Comparator<LodChunkMesh> byDistance = Comparator.comparingDouble(mesh -> distanceSquared(mesh, snapshot));
+            targetMeshes.sort(byDistance);
+            selected.sort(byDistance);
+            Set<LodChunkMesh> interested = new ObjectLinkedOpenHashSet<>(targetMeshes);
+            interested.addAll(selected);
+            LodChunkMeshManager.INSTANCE.setViewport(interested);
+
+            for (LodChunkMesh mesh : interested) {
+                if (!running) return new Selection(List.of());
+                LodChunkMeshManager.INSTANCE.retain(mesh);
+                mesh.requestLoad();
+            }
+
+            updateTaskInterest(interested);
+
+            return result;
+        } finally {
+            meshSnapshot.clear();
+            cachedMeshes.clear();
+            finerBranches.clear();
+            taskInterest.clear();
         }
-
-        FrustumIntersection frustum = new FrustumIntersection(snapshot.viewProjection());
-        double radius = snapshot.radius() + 1;
-        float rootWorldSize = worldSize(LodChunkData.MAX_LOD);
-        int centerX = (int) Math.floor(snapshot.focusX() / rootWorldSize);
-        int centerZ = (int) Math.floor(snapshot.focusZ() / rootWorldSize);
-        int rootRadius = (int) Math.ceil(radius / rootWorldSize) + 1;
-
-        CircularChunkIterator iterator = new CircularChunkIterator(centerX, centerZ, rootRadius);
-        while (running && iterator.hasNext()) {
-            int[] root = iterator.next();
-            Node node = visit(root[0], root[1], LodChunkData.MAX_LOD, targetLod, radius, snapshot, frustum,
-                    cachedMeshes, finerBranches, targetMeshes);
-            if (node != null) roots.add(node);
-        }
-
-        Selection result = new Selection(List.copyOf(roots));
-        List<LodChunkMesh> selected = result.select(LodChunkMesh::isLoaded);
-        Comparator<LodChunkMesh> byDistance = Comparator.comparingDouble(mesh -> distanceSquared(mesh, snapshot));
-        targetMeshes.sort(byDistance);
-        selected.sort(byDistance);
-        Set<LodChunkMesh> interested = new LinkedHashSet<>(targetMeshes);
-        interested.addAll(selected);
-        LodChunkMeshManager.INSTANCE.setViewport(interested);
-
-        for (LodChunkMesh mesh : interested) {
-            if (!running) return new Selection(List.of());
-            LodChunkMeshManager.INSTANCE.retain(mesh);
-            mesh.requestLoad();
-        }
-
-        updateTaskInterest(new ArrayList<>(interested));
-
-        return result;
     }
 
     private int selectLod(CameraSnapshot snapshot) {
@@ -264,20 +283,19 @@ public class LodChunkVisibilitySelector {
         return dx * dx + dz * dz;
     }
 
-    private void updateTaskInterest(List<LodChunkMesh> visible) {
-        Set<ChunkLodProcessor.CacheKey> keys = new HashSet<>();
+    private void updateTaskInterest(Collection<LodChunkMesh> visible) {
         for (LodChunkMesh mesh : visible) {
-            addTaskInterest(keys, mesh.chunkX, mesh.chunkZ, mesh.lod, mesh.dimension);
-            addTaskInterest(keys, mesh.chunkX, mesh.chunkZ - 1, mesh.lod, mesh.dimension);
-            addTaskInterest(keys, mesh.chunkX, mesh.chunkZ + 1, mesh.lod, mesh.dimension);
-            addTaskInterest(keys, mesh.chunkX - 1, mesh.chunkZ, mesh.lod, mesh.dimension);
-            addTaskInterest(keys, mesh.chunkX + 1, mesh.chunkZ, mesh.lod, mesh.dimension);
-            addTaskInterest(keys, mesh.chunkX - 1, mesh.chunkZ - 1, mesh.lod, mesh.dimension);
-            addTaskInterest(keys, mesh.chunkX + 1, mesh.chunkZ - 1, mesh.lod, mesh.dimension);
-            addTaskInterest(keys, mesh.chunkX - 1, mesh.chunkZ + 1, mesh.lod, mesh.dimension);
-            addTaskInterest(keys, mesh.chunkX + 1, mesh.chunkZ + 1, mesh.lod, mesh.dimension);
+            taskInterest.add(mesh.key());
+            addTaskInterest(taskInterest, mesh.chunkX, mesh.chunkZ - 1, mesh.lod, mesh.dimension);
+            addTaskInterest(taskInterest, mesh.chunkX, mesh.chunkZ + 1, mesh.lod, mesh.dimension);
+            addTaskInterest(taskInterest, mesh.chunkX - 1, mesh.chunkZ, mesh.lod, mesh.dimension);
+            addTaskInterest(taskInterest, mesh.chunkX + 1, mesh.chunkZ, mesh.lod, mesh.dimension);
+            addTaskInterest(taskInterest, mesh.chunkX - 1, mesh.chunkZ - 1, mesh.lod, mesh.dimension);
+            addTaskInterest(taskInterest, mesh.chunkX + 1, mesh.chunkZ - 1, mesh.lod, mesh.dimension);
+            addTaskInterest(taskInterest, mesh.chunkX - 1, mesh.chunkZ + 1, mesh.lod, mesh.dimension);
+            addTaskInterest(taskInterest, mesh.chunkX + 1, mesh.chunkZ + 1, mesh.lod, mesh.dimension);
         }
-        ChunkLodProcessor.discardQueuedTasksOutside(keys);
+        ChunkLodProcessor.discardQueuedTasksOutside(taskInterest);
     }
 
     private void addTaskInterest(Set<ChunkLodProcessor.CacheKey> keys, int chunkX, int chunkZ, int lod, String dimension) {
@@ -305,7 +323,7 @@ public class LodChunkVisibilitySelector {
                 round(yaw, ANGLE_STEP), round(pitch, ANGLE_STEP), round(zoom, POSITION_STEP), aspect, radius);
         long now = System.nanoTime();
         if (view.equals(submittedView)) {
-            // Stationary views still need dirty meshes and cancelled loads retried.
+            // Stationary views still need dirty meshes and canceled loads retried.
             if (now - submittedNanos < REFRESH_NANOS) return;
         } else {
             submittedView = view;

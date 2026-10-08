@@ -1,6 +1,6 @@
 package net.conczin.immersive_worldmap.lod;
 
-import net.conczin.immersive_worldmap.ImmersiveWorldmap;
+import it.unimi.dsi.fastutil.HashCommon;
 import net.conczin.immersive_worldmap.database.ChunkLodDatabase;
 import net.conczin.immersive_worldmap.database.DatabaseManager;
 import net.conczin.immersive_worldmap.util.ChunkHash;
@@ -17,6 +17,7 @@ import java.sql.SQLException;
 import java.util.*;
 import java.util.concurrent.CancellationException;
 import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.CompletionException;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.function.Consumer;
 import java.util.function.Predicate;
@@ -135,29 +136,29 @@ public class ChunkLodProcessor {
     private static void queueRecording(CacheKey key, int priority) {
         if (!RECORDING_TASKS.add(key)) return;
 
-        EXECUTOR.submit(priority, () -> {
+        ThreadPoolUtil.failOnError(EXECUTOR.submit(priority, () -> {
+            boolean completed = false;
             try {
                 ChunkSnapshot snapshot;
                 while ((snapshot = CHUNK_INGESTS.get(key)) != null) {
-                    try {
-                        processChunkSync(key, snapshot.sections(), snapshot);
-                    } catch (RuntimeException error) {
-                        ImmersiveWorldmap.LOGGER.warn("Failed to record chunk {}, {}", key.chunkX(), key.chunkZ(), error);
-                    }
+                    processChunkSync(key, snapshot.sections(), snapshot);
                     if (CHUNK_INGESTS.remove(key, snapshot)) break;
                 }
+                completed = true;
             } finally {
                 RECORDING_TASKS.remove(key);
-                if (CHUNK_INGESTS.containsKey(key) && !EXECUTOR.isShutdown()) queueRecording(key, priority);
+                if (completed && CHUNK_INGESTS.containsKey(key) && !EXECUTOR.isShutdown()) {
+                    queueRecording(key, priority);
+                }
             }
             return null;
         }).whenComplete((ignored, error) -> {
             if (error != null) {
                 RECORDING_TASKS.remove(key);
+                // TODO: Preserve failed LOD-0 recordings so unloaded chunks are not permanently missing from the map.
                 CHUNK_INGESTS.remove(key);
-                ImmersiveWorldmap.LOGGER.warn("Failed to record chunk {}, {}: {}", key.chunkX(), key.chunkZ(), error.getMessage());
             }
-        });
+        }));
     }
 
     private static int getBlockIndex(int height, int x, int y, int z) {
@@ -176,7 +177,7 @@ public class ChunkLodProcessor {
                 return;
             }
         } catch (SQLException e) {
-            ImmersiveWorldmap.LOGGER.warn("Failed to read chunk hash: {}", e.getMessage());
+            throw new CompletionException(e);
         }
 
         // Full vertical chunk: 16 x height x 16 bytes for LOD 0
@@ -257,7 +258,7 @@ public class ChunkLodProcessor {
                 }
                 invalidationListener.accept(key);
             } catch (SQLException e) {
-                ImmersiveWorldmap.LOGGER.warn("Failed to store chunk LOD data: {}", e.getMessage());
+                throw new CompletionException(e);
             }
         }
     }
@@ -291,8 +292,7 @@ public class ChunkLodProcessor {
             }
             return stored;
         } catch (SQLException e) {
-            ImmersiveWorldmap.LOGGER.warn("Failed to retrieve chunk LOD data: {}", e.getMessage());
-            return new ChunkLodDatabase.StoredChunk(false, null, false, 0);
+            throw new CompletionException(e);
         }
     }
 
@@ -421,7 +421,7 @@ public class ChunkLodProcessor {
         synchronized (LOD_LOCK) {
             revision = request.revision;
         }
-        loadLodAsync(key, request, revision).whenComplete((data, error) -> {
+        ThreadPoolUtil.failOnError(loadLodAsync(key, request, revision).whenComplete((data, error) -> {
             boolean retry;
             synchronized (LOD_LOCK) {
                 if (IN_FLIGHT.get(key) != request) {
@@ -442,7 +442,7 @@ public class ChunkLodProcessor {
             } else {
                 request.future.completeExceptionally(error);
             }
-        });
+        }));
     }
 
     public static void discardQueuedTasksOutside(Set<CacheKey> visibleKeys) {
@@ -469,5 +469,11 @@ public class ChunkLodProcessor {
     }
 
     public record CacheKey(int chunkX, int chunkZ, String dimension, int lod) {
+        @Override
+        public int hashCode() {
+            long coordinates = ((long) chunkX << 32) | (chunkZ & 0xffffffffL);
+            int hash = HashCommon.long2int(HashCommon.mix(coordinates));
+            return 31 * (31 * hash + Objects.hashCode(dimension)) + lod;
+        }
     }
 }

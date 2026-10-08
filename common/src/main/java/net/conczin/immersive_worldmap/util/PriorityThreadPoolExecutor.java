@@ -25,14 +25,41 @@ public final class PriorityThreadPoolExecutor extends ThreadPoolExecutor {
                 future.complete(supplier.get());
             } catch (Throwable throwable) {
                 future.completeExceptionally(throwable);
+                if (!ThreadPoolUtil.isCancellation(throwable)) {
+                    ThreadPoolUtil.crash(Thread.currentThread(), throwable);
+                }
             }
         });
         try {
             super.execute(task);
         } catch (RejectedExecutionException e) {
-            future.completeExceptionally(e);
+            if (isShutdown()) {
+                future.cancel(false);
+            } else {
+                future.completeExceptionally(e);
+                ThreadPoolUtil.crash(Thread.currentThread(), e);
+            }
         }
         return future;
+    }
+
+    @Override
+    protected <T> RunnableFuture<T> newTaskFor(Callable<T> callable) {
+        return new FutureTask<>(() -> {
+            try {
+                return callable.call();
+            } catch (Exception | Error error) {
+                if (!ThreadPoolUtil.isCancellation(error)) {
+                    ThreadPoolUtil.crash(Thread.currentThread(), error);
+                }
+                throw error;
+            }
+        });
+    }
+
+    @Override
+    protected <T> RunnableFuture<T> newTaskFor(Runnable runnable, T result) {
+        return newTaskFor(Executors.callable(runnable, result));
     }
 
     @Override
@@ -80,6 +107,8 @@ public final class PriorityThreadPoolExecutor extends ThreadPoolExecutor {
         private void cancel() {
             if (future != null) {
                 future.cancel(false);
+            } else if (task instanceof Future<?> result) {
+                result.cancel(false);
             }
         }
 

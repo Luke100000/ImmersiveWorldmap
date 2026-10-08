@@ -1,9 +1,7 @@
 package net.conczin.immersive_worldmap.renderer;
 
-import net.conczin.immersive_worldmap.ImmersiveWorldmap;
 import net.conczin.immersive_worldmap.lod.ChunkLodProcessor;
-
-import java.util.concurrent.CancellationException;
+import net.conczin.immersive_worldmap.util.ThreadPoolUtil;
 
 public class LodChunkMesh {
     public final int chunkX;
@@ -11,6 +9,7 @@ public class LodChunkMesh {
     public final int lod;
     public final String dimension;
 
+    private final ChunkLodProcessor.CacheKey key;
     private volatile byte[] geometry;
     private volatile boolean dirty = true;
     private volatile boolean requested;
@@ -20,10 +19,15 @@ public class LodChunkMesh {
     private final long pageGeneration = LodChunkPageManager.INSTANCE.generation();
 
     public LodChunkMesh(int chunkX, int chunkZ, int lod, String dimension) {
-        this.chunkX = chunkX;
-        this.chunkZ = chunkZ;
-        this.lod = lod;
-        this.dimension = dimension;
+        this(new ChunkLodProcessor.CacheKey(chunkX, chunkZ, dimension, lod));
+    }
+
+    LodChunkMesh(ChunkLodProcessor.CacheKey key) {
+        this.chunkX = key.chunkX();
+        this.chunkZ = key.chunkZ();
+        this.lod = key.lod();
+        this.dimension = key.dimension();
+        this.key = key;
     }
 
     public boolean isLoaded() {
@@ -31,7 +35,7 @@ public class LodChunkMesh {
     }
 
     ChunkLodProcessor.CacheKey key() {
-        return new ChunkLodProcessor.CacheKey(chunkX, chunkZ, dimension, lod);
+        return key;
     }
 
     byte[] geometry() {
@@ -61,7 +65,7 @@ public class LodChunkMesh {
             LodChunkPageManager.INSTANCE.offer(this, cached);
             return;
         }
-        LodChunkMeshBuilder.buildMeshAsync(chunkX, chunkZ, dimension, lod).whenComplete((result, error) -> {
+        ThreadPoolUtil.failOnError(LodChunkMeshBuilder.buildMeshAsync(chunkX, chunkZ, dimension, lod).whenComplete((result, error) -> {
             boolean accepted = false;
             synchronized (this) {
                 if (error == null && revision == requestedRevision) {
@@ -73,10 +77,8 @@ public class LodChunkMesh {
             }
             if (accepted) {
                 LodChunkPageManager.INSTANCE.offer(this, result);
-            } else if (error != null && !isCancellation(error)) {
-                ImmersiveWorldmap.LOGGER.error("Failed to load chunk LOD data: {}", error.getMessage());
             }
-        });
+        }));
     }
 
     public synchronized void markDirty() {
@@ -98,13 +100,5 @@ public class LodChunkMesh {
         dirty = true;
         requested = false;
         loaded = false;
-    }
-
-    private static boolean isCancellation(Throwable error) {
-        while (error != null) {
-            if (error instanceof CancellationException) return true;
-            error = error.getCause();
-        }
-        return false;
     }
 }

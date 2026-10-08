@@ -29,7 +29,8 @@ public class DatabaseManager {
                 throw new RuntimeException("Failed to create database directory: " + databasePath.getParent(), e);
             }
 
-            INSTANCE = new ChunkLodDatabase(databasePath);
+            ChunkLodDatabase database = new ChunkLodDatabase(databasePath);
+            if (!database.isClosed()) INSTANCE = database;
         }
     }
 
