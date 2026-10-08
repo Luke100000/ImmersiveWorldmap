@@ -24,6 +24,7 @@ import net.minecraft.util.FormattedCharSequence;
 import net.minecraft.world.entity.player.PlayerModelPart;
 import net.minecraft.world.level.block.LeavesBlock;
 import net.minecraft.world.level.block.state.BlockState;
+import net.minecraft.world.level.levelgen.Heightmap;
 import net.minecraft.world.phys.Vec3;
 import org.joml.Matrix4f;
 import org.joml.Vector4f;
@@ -46,6 +47,7 @@ public class LodViewerScreen extends Screen {
     private final Minecraft minecraft;
     private String dimension;
     private final Camera3D camera = new Camera3D();
+    private float surfaceY;
     private long openingStartNanos;
 
     private final Set<Integer> heldKeys = new HashSet<>();
@@ -95,6 +97,10 @@ public class LodViewerScreen extends Screen {
                 break;
             }
         }
+
+        surfaceY = SharedSettings.caveView ? camera.getSmoothTargetY() : Math.min(camera.getSmoothTargetY(),
+                minecraft.level.getHeight(Heightmap.Types.WORLD_SURFACE, minecraft.player.getBlockX(), minecraft.player.getBlockZ())
+                - minecraft.level.getMinBuildHeight());
 
         camera.setZoom(SharedSettings.caveView ? 150f : 225f);
         camera.setRotation(playerFacingYaw ? -minecraft.player.getYRot() : DEFAULT_YAW, SharedSettings.caveView ? -60 : -45f);
@@ -253,6 +259,7 @@ public class LodViewerScreen extends Screen {
         float zoom = camera.getSmoothZoom() * (1f + 0.3f * openingBonus);
         float yawDegrees = camera.getSmoothYaw() + 10f * openingBonus;
         Matrix4f mv, proj;
+        LodChunkVisibilitySelector.RenderRange renderRange;
         {
             float pitchDegrees = camera.getSmoothPitch() - 10f * openingBonus;
             float yaw = (float) Math.toRadians(yawDegrees);
@@ -260,16 +267,18 @@ public class LodViewerScreen extends Screen {
             float targetX = camera.getSmoothTargetX();
             float targetY = camera.getSmoothTargetY();
             float targetZ = camera.getSmoothTargetZ();
+            renderRange = LodChunkVisibilitySelector.renderRange(zoom, pitchDegrees, Math.max(0, targetY - surfaceY));
 
             float eyeX = targetX - (float) (Math.sin(yaw) * Math.cos(pitch)) * zoom;
             float eyeY = targetY - (float) (Math.sin(pitch)) * zoom;
             float eyeZ = targetZ - (float) (Math.cos(yaw) * Math.cos(pitch)) * zoom;
 
             mv = new Matrix4f().lookAt(eyeX, eyeY, eyeZ, targetX, targetY, targetZ, 0, 1, 0);
-            proj = new Matrix4f().setPerspective((float) Math.toRadians(60.0), (float) width / height, zoom * 0.1f, zoom * 10f);
+            proj = new Matrix4f().setPerspective((float) Math.toRadians(60.0), (float) width / height,
+                    zoom * 0.1f, Math.max(zoom * 10f, renderRange.end() * 2f));
 
             LodChunkVisibilitySelector.get().update(dimension, minecraft.level.getHeight(), targetX, targetY, targetZ,
-                    yawDegrees, pitchDegrees, zoom, (float) width / height);
+                    yawDegrees, pitchDegrees, zoom, (float) width / height, renderRange.end());
         }
 
         graphics.flush();
@@ -281,7 +290,7 @@ public class LodViewerScreen extends Screen {
 
         LodChunkPageManager.INSTANCE.draw(LodChunkVisibilitySelector.get().selection(), mv, proj,
                 camera.getSmoothTargetX(), camera.getSmoothTargetZ(),
-                LodChunkVisibilitySelector.renderRadius(zoom));
+                renderRange);
 
         RenderSystem.disableCull();
         RenderSystem.disableDepthTest();

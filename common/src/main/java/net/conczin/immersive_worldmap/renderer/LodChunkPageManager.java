@@ -71,7 +71,8 @@ public final class LodChunkPageManager {
         }
     }
 
-    public void draw(LodChunkVisibilitySelector.Selection selection, Matrix4f mv, Matrix4f proj, float focusX, float focusZ, float radius) {
+    public void draw(LodChunkVisibilitySelector.Selection selection, Matrix4f mv, Matrix4f proj, float focusX, float focusZ,
+                     LodChunkVisibilitySelector.RenderRange range) {
         frame++;
         uploadReady();
 
@@ -96,8 +97,8 @@ public final class LodChunkPageManager {
             shader.safeGetUniform("BackgroundUv").set(
                     (float) width / side, (float) height / side,
                     -(float) ((width - side) / 2) / side, -(float) ((height - side) / 2) / side);
-            shader.safeGetUniform("FadeStart").set(radius * 0.75f);
-            shader.safeGetUniform("FadeEnd").set(radius);
+            shader.safeGetUniform("FadeStart").set(range.start());
+            shader.safeGetUniform("FadeEnd").set(range.end());
             for (Map.Entry<Page, List<LodChunkMesh>> entry : batches.entrySet()) {
                 Page page = entry.getKey();
                 page.lastDrawFrame = frame;

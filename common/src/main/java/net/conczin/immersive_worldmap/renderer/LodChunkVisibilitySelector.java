@@ -36,7 +36,7 @@ public class LodChunkVisibilitySelector {
     private static final long REFRESH_NANOS = 50_000_000L;
 
     private record View(String dimension, int height, float x, float y, float z, float yaw, float pitch, float zoom,
-                        float aspect) {
+                        float aspect, float radius) {
     }
 
     private record CameraSnapshot(
@@ -45,7 +45,8 @@ public class LodChunkVisibilitySelector {
             int height,
             double focusX,
             double focusZ,
-            float zoom
+            float zoom,
+            float radius
     ) {
     }
 
@@ -144,7 +145,7 @@ public class LodChunkVisibilitySelector {
         }
 
         FrustumIntersection frustum = new FrustumIntersection(snapshot.viewProjection());
-        double radius = renderRadius(snapshot.zoom()) + 1;
+        double radius = snapshot.radius() + 1;
         float rootWorldSize = worldSize(LodChunkData.MAX_LOD);
         int centerX = (int) Math.floor(snapshot.focusX() / rootWorldSize);
         int centerZ = (int) Math.floor(snapshot.focusZ() / rootWorldSize);
@@ -287,9 +288,21 @@ public class LodChunkVisibilitySelector {
         return (float) Math.ceil(zoom / CHUNK_SIZE * RENDER_DISTANCE);
     }
 
-    public void update(String dimension, int height, float x, float y, float z, float yaw, float pitch, float zoom, float aspect) {
+    public record RenderRange(float start, float end) {
+    }
+
+    public static RenderRange renderRange(float zoom, float pitchDegrees, float heightAboveTerrain) {
+        double pitch = Math.toRadians(-pitchDegrees);
+        float heightOffset = heightAboveTerrain / (float) Math.sin(pitch);
+        float horizonOffset = heightOffset * (float) Math.cos(pitch);
+        float radius = renderRadius(zoom + heightOffset);
+        // Compensate the fixed height gap so the far fade edge keeps the same viewing angle at close zoom.
+        return new RenderRange(radius * 0.75f + horizonOffset, radius + horizonOffset);
+    }
+
+    public void update(String dimension, int height, float x, float y, float z, float yaw, float pitch, float zoom, float aspect, float radius) {
         View view = new View(dimension, height, round(x, POSITION_STEP), round(y, POSITION_STEP), round(z, POSITION_STEP),
-                round(yaw, ANGLE_STEP), round(pitch, ANGLE_STEP), round(zoom, POSITION_STEP), aspect);
+                round(yaw, ANGLE_STEP), round(pitch, ANGLE_STEP), round(zoom, POSITION_STEP), aspect, radius);
         long now = System.nanoTime();
         if (view.equals(submittedView)) {
             // Stationary views still need dirty meshes and cancelled loads retried.
@@ -302,9 +315,9 @@ public class LodChunkVisibilitySelector {
             float eyeY = view.y() - (float) Math.sin(pitchRadians) * view.zoom();
             float eyeZ = view.z() - (float) (Math.cos(yawRadians) * Math.cos(pitchRadians)) * view.zoom();
             Matrix4f viewProjection = new Matrix4f().setPerspective((float) Math.toRadians(60), view.aspect(),
-                            view.zoom() * 0.1f, view.zoom() * 10f)
+                            view.zoom() * 0.1f, Math.max(view.zoom() * 10f, view.radius() * 2f))
                     .lookAt(eyeX, eyeY, eyeZ, view.x(), view.y(), view.z(), 0, 1, 0);
-            submittedSnapshot = new CameraSnapshot(viewProjection, dimension, height, view.x(), view.z(), view.zoom());
+            submittedSnapshot = new CameraSnapshot(viewProjection, dimension, height, view.x(), view.z(), view.zoom(), view.radius());
         }
         submittedNanos = now;
         pendingSnapshot.set(submittedSnapshot);
