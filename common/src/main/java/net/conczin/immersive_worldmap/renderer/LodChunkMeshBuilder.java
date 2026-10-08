@@ -8,7 +8,9 @@ import net.conczin.immersive_worldmap.util.ColorManager;
 import net.conczin.immersive_worldmap.util.TesselatorPool;
 import net.conczin.immersive_worldmap.util.ThreadPoolUtil;
 
+import java.util.ArrayList;
 import java.util.Arrays;
+import java.util.List;
 import java.util.concurrent.CompletableFuture;
 
 /**
@@ -33,7 +35,6 @@ public class LodChunkMeshBuilder {
      * @param lod       LOD level
      * @return CompletableFuture containing the built vertex data
      */
-    @SuppressWarnings("DuplicatedCode")
     public static CompletableFuture<byte[]> buildMeshAsync(int chunkX, int chunkZ, String dimension, int lod) {
         CompletableFuture<LodChunkData> center = ChunkLodProcessor.getLodChunkDataAsync(chunkX, chunkZ, dimension, lod);
         return ThreadPoolUtil.failOnError(center.thenCompose(centerData -> {
@@ -41,18 +42,16 @@ public class LodChunkMeshBuilder {
                 return CompletableFuture.completedFuture(EMPTY);
             }
 
-            CompletableFuture<LodChunkData> north = ChunkLodProcessor.getLodChunkDataAsync(chunkX, chunkZ - 1, dimension, lod);
-            CompletableFuture<LodChunkData> south = ChunkLodProcessor.getLodChunkDataAsync(chunkX, chunkZ + 1, dimension, lod);
-            CompletableFuture<LodChunkData> west = ChunkLodProcessor.getLodChunkDataAsync(chunkX - 1, chunkZ, dimension, lod);
-            CompletableFuture<LodChunkData> east = ChunkLodProcessor.getLodChunkDataAsync(chunkX + 1, chunkZ, dimension, lod);
-            CompletableFuture<LodChunkData> northWest = ChunkLodProcessor.getLodChunkDataAsync(chunkX - 1, chunkZ - 1, dimension, lod);
-            CompletableFuture<LodChunkData> northEast = ChunkLodProcessor.getLodChunkDataAsync(chunkX + 1, chunkZ - 1, dimension, lod);
-            CompletableFuture<LodChunkData> southWest = ChunkLodProcessor.getLodChunkDataAsync(chunkX - 1, chunkZ + 1, dimension, lod);
-            CompletableFuture<LodChunkData> southEast = ChunkLodProcessor.getLodChunkDataAsync(chunkX + 1, chunkZ + 1, dimension, lod);
-            return CompletableFuture.allOf(north, south, west, east, northWest, northEast, southWest, southEast).thenCompose(ignored ->
+            List<CompletableFuture<LodChunkData>> chunks = new ArrayList<>(9);
+            for (int dx = -1; dx <= 1; dx++) {
+                for (int dz = -1; dz <= 1; dz++) {
+                    chunks.add(dx == 0 && dz == 0 ? center : ChunkLodProcessor.getLodChunkDataAsync(chunkX + dx, chunkZ + dz, dimension, lod));
+                }
+            }
+            return CompletableFuture.allOf(chunks.toArray(CompletableFuture[]::new)).thenCompose(ignored ->
                     ChunkLodProcessor.EXECUTOR.submit(lod, new ChunkLodProcessor.CacheKey(chunkX, chunkZ, dimension, lod),
-                            () -> buildMesh(new ChunkNeighborhood(centerData, north.join(), south.join(), west.join(), east.join(),
-                                    northWest.join(), northEast.join(), southWest.join(), southEast.join()), lod)));
+                            () -> buildMesh(new ChunkNeighborhood(chunks.stream().map(CompletableFuture::join)
+                                    .toArray(LodChunkData[]::new), null), lod)));
         }));
     }
 
@@ -80,7 +79,6 @@ public class LodChunkMeshBuilder {
             int height = center.getHeight();
 
             // Different shading for each face direction
-            float topBrightness = 1.0F;
             float sideBrightness = 0.8F;
             float sideEWBrightness = 0.72F; // 0.8 * 0.9
             boolean hasFaces = false;
@@ -99,11 +97,10 @@ public class LodChunkMeshBuilder {
                             continue; // Skip air blocks (MapColor.NONE has id 0)
                         }
 
-                        // Get RGBA color from ColorManager
-                        int[] color = ColorManager.byteToRGBA(blockColorId);
-                        int b = color[0];
+                        int[] color = ColorManager.byteToRGB(blockColorId);
+                        int r = color[0];
                         int g = color[1];
-                        int r = color[2];
+                        int b = color[2];
 
                         // Add noise
                         int noise = positionNoise(
@@ -119,9 +116,9 @@ public class LodChunkMeshBuilder {
                                 ? CAVE_TOP_BRIGHTNESS : 1.0F;
 
                         // Pre-calculate brightness-adjusted colors for each face direction
-                        float rTop = r * topBrightness * topMul;
-                        float gTop = g * topBrightness * topMul;
-                        float bTop = b * topBrightness * topMul;
+                        float rTop = r * topMul;
+                        float gTop = g * topMul;
+                        float bTop = b * topMul;
 
                         float rSide = r * sideBrightness;
                         float gSide = g * sideBrightness;
@@ -252,10 +249,10 @@ public class LodChunkMeshBuilder {
     // Lowest stored surface of a chunk and its four direct neighbors
     private static int getMinSurrounding(ChunkNeighborhood neighbors) {
         int min = getSurface(neighbors.center());
-        min = Math.min(min, getSurface(neighbors.north()));
-        min = Math.min(min, getSurface(neighbors.south()));
-        min = Math.min(min, getSurface(neighbors.west()));
-        min = Math.min(min, getSurface(neighbors.east()));
+        min = Math.min(min, getSurface(neighbors.getChunk(0, -1)));
+        min = Math.min(min, getSurface(neighbors.getChunk(0, 1)));
+        min = Math.min(min, getSurface(neighbors.getChunk(-1, 0)));
+        min = Math.min(min, getSurface(neighbors.getChunk(1, 0)));
         return min;
     }
 
@@ -292,34 +289,13 @@ public class LodChunkMeshBuilder {
         return (3 - ((side1 ? 1 : 0) + (side2 ? 1 : 0) + (corner ? 1 : 0))) / 6.0f + 0.5f;
     }
 
-    private record ChunkNeighborhood(
-            LodChunkData center,
-            LodChunkData north,
-            LodChunkData south,
-            LodChunkData west,
-            LodChunkData east,
-            LodChunkData northWest,
-            LodChunkData northEast,
-            LodChunkData southWest,
-            LodChunkData southEast,
-            CaveSlice slice
-    ) {
-        private ChunkNeighborhood(
-                LodChunkData center,
-                LodChunkData north,
-                LodChunkData south,
-                LodChunkData west,
-                LodChunkData east,
-                LodChunkData northWest,
-                LodChunkData northEast,
-                LodChunkData southWest,
-                LodChunkData southEast
-        ) {
-            this(center, north, south, west, east, northWest, northEast, southWest, southEast, null);
+    private record ChunkNeighborhood(LodChunkData[] chunks, CaveSlice slice) {
+        private LodChunkData center() {
+            return getChunk(0, 0);
         }
 
         private ChunkNeighborhood withSlice(CaveSlice slice) {
-            return new ChunkNeighborhood(center, north, south, west, east, northWest, northEast, southWest, southEast, slice);
+            return new ChunkNeighborhood(chunks, slice);
         }
 
         private boolean isAir(int x, int y, int z) {
@@ -337,31 +313,12 @@ public class LodChunkMeshBuilder {
         }
 
         private LodChunkData getChunk(int chunkX, int chunkZ) {
-            return switch (chunkX) {
-                case -1 -> switch (chunkZ) {
-                    case -1 -> northWest;
-                    case 0 -> west;
-                    case 1 -> southWest;
-                    default -> null;
-                };
-                case 0 -> switch (chunkZ) {
-                    case -1 -> north;
-                    case 0 -> center;
-                    case 1 -> south;
-                    default -> null;
-                };
-                case 1 -> switch (chunkZ) {
-                    case -1 -> northEast;
-                    case 0 -> east;
-                    case 1 -> southEast;
-                    default -> null;
-                };
-                default -> null;
-            };
+            return chunkX < -1 || chunkX > 1 || chunkZ < -1 || chunkZ > 1 ? null
+                    : chunks[(chunkX + 1) * 3 + chunkZ + 1];
         }
     }
 
-    // Per column cave view cut heights for a 3x3 chunk neighborhood. Only depends on each column's own
+    // Per-column cave view cut heights for a 3x3 chunk neighborhood. Only depends on each column's own
     // blocks, so it stays consistent across chunk borders.
     private static final class CaveSlice {
         private static final int COLUMNS_PER_CHUNK = 16 * 16;
@@ -388,8 +345,7 @@ public class LodChunkMeshBuilder {
             }
         }
 
-        // Follows solids upward from the baseline to keep cave walls visible. A column that already starts
-        // with air is cut right at the baseline.
+        // Follows solids upward from the baseline to keep cave walls visible.
         private static int computeCut(LodChunkData chunk, int x, int z, int baseline, int limit) {
             int height = chunk.getHeight();
             int y = Math.min(baseline, height - 1);

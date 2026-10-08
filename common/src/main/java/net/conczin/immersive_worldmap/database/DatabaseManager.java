@@ -30,7 +30,9 @@ public class DatabaseManager {
             }
 
             ChunkLodDatabase database = new ChunkLodDatabase(databasePath);
-            if (!database.isClosed()) INSTANCE = database;
+            if (!database.isClosed()) {
+                INSTANCE = database;
+            }
         }
     }
 

@@ -22,15 +22,14 @@ import java.util.function.BooleanSupplier;
 @Mixin(ClientLevel.class)
 public class ClientLevelMixin {
     @Unique
-    private final Map<ChunkPos, Long> immersiveWorldmap$dirtyChunks = new LinkedHashMap<>();
+    private final LinkedHashMap<ChunkPos, Long> immersiveWorldmap$dirtyChunks = new LinkedHashMap<>();
 
     @Inject(method = "setBlocksDirty", at = @At("HEAD"))
     private void onBlockChanged(BlockPos pos, BlockState oldState, BlockState newState, CallbackInfo ci) {
         if (!ImmersiveWorldmapClient.shouldRecordChunks()) return;
 
         ChunkPos chunkPos = new ChunkPos(pos);
-        immersiveWorldmap$dirtyChunks.remove(chunkPos);
-        immersiveWorldmap$dirtyChunks.put(chunkPos, System.nanoTime());
+        immersiveWorldmap$dirtyChunks.putLast(chunkPos, System.nanoTime());
     }
 
     @Inject(method = "tick", at = @At("TAIL"))

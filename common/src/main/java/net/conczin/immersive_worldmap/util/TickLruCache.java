@@ -8,7 +8,7 @@ public final class TickLruCache<K, V> {
     private static final AtomicLong CURRENT_TICK = new AtomicLong();
 
     private static final class Entry<V> {
-        V value;
+        final V value;
         long lastAccessTick;
 
         Entry(V value) {
@@ -35,15 +35,13 @@ public final class TickLruCache<K, V> {
         return entry.value;
     }
 
-    public synchronized V put(K key, V value) {
-        Entry<V> previous = entries.put(key, new Entry<>(value));
+    public synchronized void put(K key, V value) {
+        entries.put(key, new Entry<>(value));
         evictOldEntries();
-        return previous == null ? null : previous.value;
     }
 
-    public synchronized V remove(K key) {
-        Entry<V> removed = entries.remove(key);
-        return removed == null ? null : removed.value;
+    public synchronized void remove(K key) {
+        entries.remove(key);
     }
 
     public synchronized void removeIf(Predicate<K> predicate) {
@@ -58,10 +56,8 @@ public final class TickLruCache<K, V> {
         return values;
     }
 
-    public synchronized List<V> clear() {
-        List<V> values = values();
+    public synchronized void clear() {
         entries.clear();
-        return values;
     }
 
     private void evictOldEntries() {

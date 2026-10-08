@@ -55,7 +55,9 @@ public final class CircularChunkIterator implements Iterator<int[]> {
 
     @Override
     public int[] next() {
-        if (next == null) throw new NoSuchElementException();
+        if (next == null) {
+            throw new NoSuchElementException();
+        }
         int[] result = next;
         advance();
         return result;

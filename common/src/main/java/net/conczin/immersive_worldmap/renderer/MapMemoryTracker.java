@@ -84,7 +84,9 @@ public final class MapMemoryTracker {
     private static String formatBytes(long bytes) {
         if (bytes < 1024) return bytes + "B";
         if (bytes < 1024 * 1024) return String.format(Locale.ROOT, "%.0fKiB", bytes / 1024.0);
-        if (bytes >= 1024L * 1024 * 1024) return String.format(Locale.ROOT, "%.1fGiB", bytes / (1024.0 * 1024 * 1024));
+        if (bytes >= 1024L * 1024 * 1024) {
+            return String.format(Locale.ROOT, "%.1fGiB", bytes / (1024.0 * 1024 * 1024));
+        }
         return String.format(Locale.ROOT, "%.1fMiB", bytes / (1024.0 * 1024));
     }
 }

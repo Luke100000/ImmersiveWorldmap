@@ -7,6 +7,7 @@ import net.conczin.immersive_worldmap.renderer.LodChunkMeshManager;
 import net.conczin.immersive_worldmap.renderer.LodChunkPageManager;
 import net.conczin.immersive_worldmap.renderer.LodChunkVisibilitySelector;
 import net.conczin.immersive_worldmap.renderer.MapMemoryTracker;
+import net.conczin.immersive_worldmap.util.TickLruCache;
 import net.minecraft.client.KeyMapping;
 import net.minecraft.client.Minecraft;
 import net.minecraft.client.multiplayer.ServerData;
@@ -38,7 +39,7 @@ public final class ImmersiveWorldmapClient {
     }
 
     public static void onClientTick() {
-        LodChunkMeshManager.tick();
+        TickLruCache.tick();
         long now = System.nanoTime();
         if (now - lastMaintenance < TimeUnit.SECONDS.toNanos(1)) return;
         lastMaintenance = now;
@@ -94,10 +95,8 @@ public final class ImmersiveWorldmapClient {
         LodChunkMeshManager.INSTANCE.clear();
 
         if (shouldRecordChunks()) {
-            if (DatabaseManager.isInitialized()) {
-                ChunkLodProcessor.shutdown();
-                DatabaseManager.shutdown();
-            }
+            ChunkLodProcessor.shutdown();
+            DatabaseManager.shutdown();
 
             // Start database and processor
             ServerData server = Minecraft.getInstance().getCurrentServer();

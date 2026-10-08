@@ -207,7 +207,7 @@ public class ChunkLodProcessor {
         synchronized (LOD_LOCK) {
             // An older queued snapshot must not overwrite a newer full or partial update.
             if (CHUNK_INGESTS.get(key) == revision) {
-                upsertChunkData(key.chunkX(), key.chunkZ(), key.dimension(), 0, chunkData, minSurface, chunkHash);
+                upsertChunkData(key, chunkData, minSurface, chunkHash, null, 0);
             }
         }
     }
@@ -220,8 +220,7 @@ public class ChunkLodProcessor {
             for (int z = 0; z < 16; z++) {
                 int top = 0;
                 for (int y = height - 1; y > 0; y--) {
-                    boolean skyAbove = y + 1 >= height || data[x * height * 16 + (y + 1) * 16 + z] == 0;
-                    if (skyAbove && data[x * height * 16 + y * 16 + z] != 0) {
+                    if (data[x * height * 16 + y * 16 + z] != 0) {
                         top = y;
                         break;
                     }
@@ -229,11 +228,7 @@ public class ChunkLodProcessor {
                 min = Math.min(min, top);
             }
         }
-        return min == Integer.MAX_VALUE ? 0 : min;
-    }
-
-    private static void upsertChunkData(int chunkX, int chunkZ, String dimension, int lod, byte[] data, int minSurface, long chunkHash) {
-        upsertChunkData(new CacheKey(chunkX, chunkZ, dimension, lod), data, minSurface, chunkHash, null, 0);
+        return min;
     }
 
     private static void upsertChunkData(CacheKey key, byte[] data, int minSurface, long chunkHash, LodRequest request, long revision) {

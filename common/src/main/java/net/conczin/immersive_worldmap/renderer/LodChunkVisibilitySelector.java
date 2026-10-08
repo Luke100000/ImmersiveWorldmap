@@ -12,7 +12,6 @@ import org.joml.Matrix4f;
 import java.util.*;
 import java.util.concurrent.atomic.AtomicReference;
 import java.util.concurrent.locks.LockSupport;
-import java.util.function.Predicate;
 
 public class LodChunkVisibilitySelector {
     private static LodChunkVisibilitySelector INSTANCE;
@@ -57,7 +56,7 @@ public class LodChunkVisibilitySelector {
 
     private final AtomicReference<CameraSnapshot> pendingSnapshot = new AtomicReference<>(null);
 
-    private volatile Selection selection = new Selection(List.of());
+    private volatile LodChunkPageManager.Plan selection = LodChunkPageManager.Plan.EMPTY;
     private View submittedView;
     private CameraSnapshot submittedSnapshot;
     private long submittedNanos;
@@ -65,36 +64,6 @@ public class LodChunkVisibilitySelector {
     private String selectedDimension;
 
     private final Set<ChunkLodProcessor.CacheKey> taskInterest = new ObjectOpenHashSet<>();
-
-    public record Selection(List<Node> roots) {
-        public List<LodChunkMesh> select(Predicate<LodChunkMesh> ready) {
-            List<LodChunkMesh> selected = new ArrayList<>();
-            for (Node root : roots) root.select(selected, ready);
-            return selected;
-        }
-    }
-
-    record Node(LodChunkMesh mesh, boolean preferred, List<Node> children) {
-        private boolean select(List<LodChunkMesh> selected, Predicate<LodChunkMesh> ready) {
-            boolean loaded = mesh != null && ready.test(mesh);
-            if (preferred && loaded) {
-                selected.add(mesh);
-                return true;
-            }
-            int start = selected.size();
-            if (children != null) {
-                boolean covered = true;
-                for (Node child : children) covered &= child.select(selected, ready);
-                if (covered) return true;
-            }
-            if (loaded) {
-                selected.subList(start, selected.size()).clear();
-                selected.add(mesh);
-                return true;
-            }
-            return false;
-        }
-    }
 
     private final Thread worker;
     private volatile boolean running = true;
@@ -121,25 +90,18 @@ public class LodChunkVisibilitySelector {
 
     private void workerLoop() {
         while (running) {
-            CameraSnapshot snapshot = waitForSnapshot();
-            if (snapshot == null) continue;
-            selection = buildSelection(snapshot);
+            CameraSnapshot snapshot = pendingSnapshot.getAndSet(null);
+            if (snapshot == null) {
+                LockSupport.park();
+            } else {
+                selection = buildSelection(snapshot);
+            }
         }
     }
 
-    private CameraSnapshot waitForSnapshot() {
-        while (running) {
-            CameraSnapshot snap = pendingSnapshot.getAndSet(null);
-            if (snap != null) return snap;
-            LockSupport.parkNanos(1_000_000L);
-            if (Thread.currentThread().isInterrupted()) return null;
-        }
-        return null;
-    }
-
-    private Selection buildSelection(CameraSnapshot snapshot) {
+    private LodChunkPageManager.Plan buildSelection(CameraSnapshot snapshot) {
         try {
-            List<Node> roots = new ArrayList<>();
+            List<LodChunkMesh> selected = new ArrayList<>();
             List<LodChunkMesh> targetMeshes = new ArrayList<>();
             int targetLod = selectLod(snapshot);
             FrustumIntersection frustum = new FrustumIntersection(snapshot.viewProjection());
@@ -152,29 +114,27 @@ public class LodChunkVisibilitySelector {
             CircularChunkIterator iterator = new CircularChunkIterator(centerX, centerZ, rootRadius);
             while (running && iterator.hasNext()) {
                 int[] root = iterator.next();
-                Node node = visit(root[0], root[1], LodChunkData.MAX_LOD, targetLod, radius, snapshot, frustum,
-                        targetMeshes);
-                if (node != null) roots.add(node);
+                visit(root[0], root[1], LodChunkData.MAX_LOD, targetLod, radius, snapshot, frustum,
+                        targetMeshes, selected);
             }
 
-            Selection result = new Selection(List.copyOf(roots));
-            List<LodChunkMesh> selected = result.select(LodChunkMesh::isLoaded);
             Comparator<LodChunkMesh> byDistance = Comparator.comparingDouble(mesh -> distanceSquared(mesh, snapshot));
             targetMeshes.sort(byDistance);
-            selected.sort(byDistance);
             Set<LodChunkMesh> interested = new ObjectLinkedOpenHashSet<>(targetMeshes);
             interested.addAll(selected);
             LodChunkMeshManager.INSTANCE.setViewport(interested);
 
             for (LodChunkMesh mesh : interested) {
-                if (!running) return new Selection(List.of());
+                if (!running) {
+                    return LodChunkPageManager.Plan.EMPTY;
+                }
                 LodChunkMeshManager.INSTANCE.retain(mesh);
                 mesh.requestLoad();
             }
 
             updateTaskInterest(interested);
 
-            return result;
+            return LodChunkPageManager.INSTANCE.prepare(interested, selected);
         } finally {
             taskInterest.clear();
         }
@@ -201,7 +161,7 @@ public class LodChunkVisibilitySelector {
         return targetLod;
     }
 
-    private Node visit(
+    private boolean visit(
             int chunkX,
             int chunkZ,
             int lod,
@@ -209,11 +169,12 @@ public class LodChunkVisibilitySelector {
             double radius,
             CameraSnapshot snapshot,
             FrustumIntersection frustum,
-            List<LodChunkMesh> targetMeshes
+            List<LodChunkMesh> targetMeshes,
+            List<LodChunkMesh> selected
     ) {
         float size = worldSize(lod);
         if (!isVisible(chunkX, chunkZ, size, radius, snapshot, frustum)) {
-            return null;
+            return true;
         }
 
         ChunkLodProcessor.CacheKey key = new ChunkLodProcessor.CacheKey(chunkX, chunkZ, snapshot.dimension(), lod);
@@ -224,21 +185,35 @@ public class LodChunkVisibilitySelector {
         } else {
             mesh = LodChunkMeshManager.INSTANCE.find(key);
         }
-        if (lod <= targetLod && !LodChunkMeshManager.INSTANCE.hasFinerGeometry(key)) {
-            return new Node(mesh, true, null);
+
+        boolean loaded = mesh != null && LodChunkPageManager.INSTANCE.isDrawable(mesh);
+        if (lod <= targetLod && loaded) {
+            selected.add(mesh);
+            return true;
         }
 
-        List<Node> children = new ArrayList<>(4);
-        int childX = chunkX * 2;
-        int childZ = chunkZ * 2;
-        for (int x = 0; x < 2; x++) {
-            for (int z = 0; z < 2; z++) {
-                Node child = visit(childX + x, childZ + z, lod - 1, targetLod, radius,
-                        snapshot, frustum, targetMeshes);
-                if (child != null) children.add(child);
+        int start = selected.size();
+        if (lod > targetLod || LodChunkMeshManager.INSTANCE.hasFinerGeometry(key)) {
+            boolean covered = true;
+            int childX = chunkX * 2;
+            int childZ = chunkZ * 2;
+            for (int x = 0; x < 2; x++) {
+                for (int z = 0; z < 2; z++) {
+                    covered &= visit(childX + x, childZ + z, lod - 1, targetLod, radius,
+                            snapshot, frustum, targetMeshes, selected);
+                }
             }
+            if (covered) return true;
         }
-        return new Node(mesh, lod <= targetLod, List.copyOf(children));
+
+        if (loaded) {
+            // An incomplete finer cut keeps its resident coarse fallback.
+            selected.subList(start, selected.size()).clear();
+            selected.add(mesh);
+            return true;
+        }
+
+        return false;
     }
 
     private boolean isVisible(int chunkX, int chunkZ, float size, double radius, CameraSnapshot snapshot, FrustumIntersection frustum) {
@@ -268,24 +243,15 @@ public class LodChunkVisibilitySelector {
     private void updateTaskInterest(Collection<LodChunkMesh> visible) {
         for (LodChunkMesh mesh : visible) {
             taskInterest.add(mesh.key());
-            addTaskInterest(taskInterest, mesh.chunkX, mesh.chunkZ - 1, mesh.lod, mesh.dimension);
-            addTaskInterest(taskInterest, mesh.chunkX, mesh.chunkZ + 1, mesh.lod, mesh.dimension);
-            addTaskInterest(taskInterest, mesh.chunkX - 1, mesh.chunkZ, mesh.lod, mesh.dimension);
-            addTaskInterest(taskInterest, mesh.chunkX + 1, mesh.chunkZ, mesh.lod, mesh.dimension);
-            addTaskInterest(taskInterest, mesh.chunkX - 1, mesh.chunkZ - 1, mesh.lod, mesh.dimension);
-            addTaskInterest(taskInterest, mesh.chunkX + 1, mesh.chunkZ - 1, mesh.lod, mesh.dimension);
-            addTaskInterest(taskInterest, mesh.chunkX - 1, mesh.chunkZ + 1, mesh.lod, mesh.dimension);
-            addTaskInterest(taskInterest, mesh.chunkX + 1, mesh.chunkZ + 1, mesh.lod, mesh.dimension);
+            for (int dx = -1; dx <= 1; dx++) {
+                for (int dz = -1; dz <= 1; dz++) {
+                    if (dx != 0 || dz != 0) {
+                        taskInterest.add(new ChunkLodProcessor.CacheKey(mesh.chunkX + dx, mesh.chunkZ + dz, mesh.dimension, mesh.lod));
+                    }
+                }
+            }
         }
         ChunkLodProcessor.discardQueuedTasksOutside(taskInterest);
-    }
-
-    private void addTaskInterest(Set<ChunkLodProcessor.CacheKey> keys, int chunkX, int chunkZ, int lod, String dimension) {
-        keys.add(new ChunkLodProcessor.CacheKey(chunkX, chunkZ, dimension, lod));
-    }
-
-    public static float renderRadius(float zoom) {
-        return (float) Math.ceil(zoom / CHUNK_SIZE * RENDER_DISTANCE);
     }
 
     public record RenderRange(float start, float end) {
@@ -295,7 +261,7 @@ public class LodChunkVisibilitySelector {
         double pitch = Math.toRadians(-pitchDegrees);
         float heightOffset = heightAboveTerrain / (float) Math.sin(pitch);
         float horizonOffset = heightOffset * (float) Math.cos(pitch);
-        float radius = renderRadius(zoom + heightOffset);
+        float radius = (float) Math.ceil((zoom + heightOffset) / CHUNK_SIZE * RENDER_DISTANCE);
         // Compensate the fixed height gap so the far fade edge keeps the same viewing angle at close zoom.
         return new RenderRange(radius * 0.75f + horizonOffset, radius + horizonOffset);
     }
@@ -321,13 +287,14 @@ public class LodChunkVisibilitySelector {
         }
         submittedNanos = now;
         pendingSnapshot.set(submittedSnapshot);
+        LockSupport.unpark(worker);
     }
 
     private static float round(float value, float step) {
         return (float) (Math.rint(value / step) * step);
     }
 
-    public Selection selection() {
+    public LodChunkPageManager.Plan selection() {
         return selection;
     }
 }

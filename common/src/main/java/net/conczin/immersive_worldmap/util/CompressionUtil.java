@@ -28,7 +28,9 @@ public final class CompressionUtil {
         for (int i = 0; i < srcLen; ) {
             byte v = src[i];
             int run = 1;
-            while (i + run < srcLen && src[i + run] == v && run < 255) run++;
+            while (i + run < srcLen && src[i + run] == v && run < 255) {
+                run++;
+            }
             dst[o++] = (byte) run;
             dst[o++] = v;
             i += run;

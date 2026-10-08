@@ -3,8 +3,6 @@ package net.conczin.immersive_worldmap.renderer;
 import com.mojang.blaze3d.systems.RenderSystem;
 import com.mojang.blaze3d.vertex.*;
 import it.unimi.dsi.fastutil.HashCommon;
-import it.unimi.dsi.fastutil.objects.ObjectOpenHashSet;
-import net.conczin.immersive_worldmap.lod.ChunkLodProcessor;
 import net.conczin.immersive_worldmap.screen.MapBackgroundTexture;
 import net.conczin.immersive_worldmap.util.PriorityThreadPoolExecutor;
 import net.conczin.immersive_worldmap.util.ThreadPoolUtil;
@@ -21,7 +19,6 @@ import java.nio.ByteBuffer;
 import java.nio.IntBuffer;
 import java.util.*;
 import java.util.concurrent.ConcurrentHashMap;
-import java.util.concurrent.ConcurrentLinkedQueue;
 
 public final class LodChunkPageManager {
     public static final int PAGE_SIZE = 16;
@@ -30,7 +27,6 @@ public final class LodChunkPageManager {
     private static final int SLOTS = PAGE_SIZE * PAGE_SIZE;
     private static final int VERTEX_SIZE = DefaultVertexFormat.POSITION_COLOR.getVertexSize();
     private static final int QUAD_SIZE = 4 * VERTEX_SIZE;
-    private static final int MAX_UPLOADS_PER_FRAME = 1;
     private static final long PRUNE_INTERVAL_NANOS = 200_000_000L;
 
     public static final LodChunkPageManager INSTANCE = new LodChunkPageManager();
@@ -38,61 +34,61 @@ public final class LodChunkPageManager {
     private final Map<PageKey, Page> pages = new ConcurrentHashMap<>();
     private final PriorityThreadPoolExecutor buildExecutor =
             ThreadPoolUtil.createLowPriorityFixedThreadPool("ImmersiveWorldmap-PageBuilder", 1);
-    private final ConcurrentLinkedQueue<Page> uploadQueue = new ConcurrentLinkedQueue<>();
+
+    private final Matrix4f localMv = new Matrix4f();
+    private final IntBuffer counts = BufferUtils.createIntBuffer(SLOTS);
+    private final IntBuffer bases = BufferUtils.createIntBuffer(SLOTS);
+
+    // Quad indices start at zero for every mesh and only the base vertex varies.
+    private final PointerBuffer offsets = BufferUtils.createPointerBuffer(SLOTS);
     private long gpuBytes;
-    private long frame;
-    private long generation;
+    private int uploadCursor;
     private volatile boolean active;
     private volatile long assemblingBytes;
 
-    private final Set<ChunkLodProcessor.CacheKey> pruningViewport = new ObjectOpenHashSet<>();
-    private final Set<PageKey> neededPages = new ObjectOpenHashSet<>();
-    private final List<LodChunkMesh> previousVisible = new ArrayList<>();
-    private Set<ChunkLodProcessor.CacheKey> previousViewport;
     private long lastPruneNanos;
 
     private LodChunkPageManager() {
     }
 
+    public record Plan(Map<Page, List<LodChunkMesh>> drawPages, List<Page> neededPages) {
+        static final Plan EMPTY = new Plan(Map.of(), List.of());
+    }
+
     public int getPendingTaskCount() {
-        return buildExecutor.getActiveCount() + buildExecutor.getQueue().size() + uploadQueue.size();
+        return buildExecutor.getActiveCount() + buildExecutor.getQueue().size()
+               + (int) pages.values().stream().filter(page -> page.ready != null).count();
     }
 
-    synchronized long generation() {
-        return generation;
-    }
-
-    synchronized void offer(LodChunkMesh chunk, byte[] geometry) {
-        if (!active || chunk.pageGeneration() != generation || chunk.geometry() != geometry
-            || !LodChunkMeshManager.INSTANCE.viewport().contains(chunk.key())) return;
-        if (geometry.length == 0 && !pages.containsKey(key(chunk))) {
-            chunk.onPageUploaded(geometry);
-            return;
+    synchronized Plan prepare(Collection<LodChunkMesh> interested, List<LodChunkMesh> visible) {
+        if (!active) return Plan.EMPTY;
+        Map<Page, List<LodChunkMesh>> inputs = new LinkedHashMap<>();
+        long now = System.nanoTime();
+        for (LodChunkMesh mesh : interested) {
+            Page page = pages.computeIfAbsent(key(mesh), Page::new);
+            page.lastUsedNanos = now;
+            inputs.computeIfAbsent(page, ignored -> new ArrayList<>()).add(mesh);
+        }
+        for (Map.Entry<Page, List<LodChunkMesh>> entry : inputs.entrySet()) {
+            entry.getKey().update(entry.getValue());
         }
 
-        PageKey key = key(chunk);
-        while (true) {
-            Page page = pages.computeIfAbsent(key, Page::new);
-            if (page.offer(chunk, geometry)) return;
-            pages.remove(key, page);
+        Map<Page, List<LodChunkMesh>> batches = new LinkedHashMap<>();
+        for (LodChunkMesh mesh : visible) {
+            Page page = pages.get(key(mesh));
+            batches.computeIfAbsent(page, ignored -> new ArrayList<>()).add(mesh);
         }
+        batches.replaceAll((page, meshes) -> List.copyOf(meshes));
+        return new Plan(Collections.unmodifiableMap(batches), List.copyOf(inputs.keySet()));
     }
 
-    public void draw(LodChunkVisibilitySelector.Selection selection, Matrix4f mv, Matrix4f proj, float focusX, float focusZ,
+    public void draw(Plan plan, Matrix4f mv, Matrix4f proj, float focusX, float focusZ,
                      LodChunkVisibilitySelector.RenderRange range) {
-        frame++;
-        uploadReady();
-
-        // Residency changes during uploads and eviction, so choose the LOD cut on the render thread.
-        List<LodChunkMesh> visible = selection.select(this::isDrawable);
-        Map<Page, List<LodChunkMesh>> batches = new HashMap<>();
-        for (LodChunkMesh chunk : visible) {
-            if (chunk.pageGeneration() != generation) continue;
-            Page page = pages.get(key(chunk));
-            if (page != null) {
-                batches.computeIfAbsent(page, ignored -> new ArrayList<>()).add(chunk);
-            }
+        long now = System.nanoTime();
+        for (Page page : plan.neededPages) {
+            page.lastUsedNanos = now;
         }
+        uploadReady(plan);
 
         Minecraft minecraft = Minecraft.getInstance();
         ShaderInstance shader = minecraft.gameRenderer.getShader(SHADER_NAME);
@@ -106,31 +102,35 @@ public final class LodChunkPageManager {
                     -(float) ((width - side) / 2) / side, -(float) ((height - side) / 2) / side);
             shader.safeGetUniform("FadeStart").set(range.start());
             shader.safeGetUniform("FadeEnd").set(range.end());
-            for (Map.Entry<Page, List<LodChunkMesh>> entry : batches.entrySet()) {
-                Page page = entry.getKey();
-                page.lastDrawFrame = frame;
-                page.draw(entry.getValue(), mv, proj, shader, focusX, focusZ);
-            }
+            plan.drawPages.forEach((page, meshes) -> page.draw(meshes, mv, proj, shader, focusX, focusZ));
         }
-        pruneUnusedPages(visible);
+        pruneUnusedPages(now);
     }
 
-    private boolean isDrawable(LodChunkMesh chunk) {
-        if (chunk.pageGeneration() != generation) return false;
-        Page page = pages.get(key(chunk));
-        if (page != null && page.installedChunks[page.slot(chunk)] == chunk) return true;
-        byte[] geometry = chunk.geometry();
-        return chunk.isLoaded() && geometry != null && geometry.length == 0;
+    boolean isDrawable(LodChunkMesh mesh) {
+        Page page = pages.get(key(mesh));
+        PageData uploaded = page == null ? null : page.uploaded;
+        if (uploaded != null && uploaded.snapshot.chunks[slot(mesh)] == mesh) return true;
+        byte[] geometry = mesh.geometry();
+        return geometry != null && geometry.length == 0;
     }
 
     public synchronized void clear() {
-        generation++;
-        releasePages();
+        for (Page page : pages.values()) {
+            page.close();
+        }
+        pages.clear();
+        buildExecutor.getQueue().clear();
+        gpuBytes = 0;
+        uploadCursor = 0;
+        lastPruneNanos = 0;
     }
 
     public synchronized void setActive(boolean active) {
         this.active = active;
-        if (!active) releasePages();
+        if (!active) {
+            clear();
+        }
     }
 
     public long getGpuBytes() {
@@ -141,36 +141,13 @@ public final class LodChunkPageManager {
         return pages.size() * 16L * 1024 + assemblingBytes + pages.values().stream().mapToLong(Page::readyBytes).sum();
     }
 
-    private void releasePages() {
-        for (Page page : pages.values()) {
-            page.close();
-        }
-        pages.clear();
-        buildExecutor.getQueue().clear();
-        uploadQueue.clear();
-        gpuBytes = 0;
-
-        pruningViewport.clear();
-        neededPages.clear();
-        previousVisible.clear();
-        previousViewport = null;
-        lastPruneNanos = 0;
+    private static int slot(LodChunkMesh mesh) {
+        return Math.floorMod(mesh.chunkX, PAGE_SIZE) * PAGE_SIZE + Math.floorMod(mesh.chunkZ, PAGE_SIZE);
     }
 
     private static PageKey key(LodChunkMesh chunk) {
         return new PageKey(chunk.dimension, chunk.lod,
                 Math.floorDiv(chunk.chunkX, PAGE_SIZE), Math.floorDiv(chunk.chunkZ, PAGE_SIZE));
-    }
-
-    private void buildPage(Page page) {
-        Snapshot snapshot = page.snapshot();
-        if (snapshot == null) return;
-
-        try {
-            page.built(assemble(snapshot));
-        } finally {
-            assemblingBytes = 0;
-        }
     }
 
     private PageBuild assemble(Snapshot snapshot) {
@@ -191,73 +168,39 @@ public final class LodChunkPageManager {
             indexCounts[slot] = indices;
         }
 
-        ByteBufferBuilder buffer = null;
-        MeshData mesh = null;
-        if (totalBytes > 0) {
-            assemblingBytes = totalBytes;
-            buffer = new ByteBufferBuilder(totalBytes);
-            try {
-                ByteBuffer target = MemoryUtil.memByteBuffer(buffer.reserve(totalBytes), totalBytes);
-                for (byte[] geometry : snapshot.geometry) {
-                    if (geometry != null && geometry.length > 0) target.put(geometry);
-                }
-                // Multi-draw reuses the quad indices from zero with a different base vertex per chunk.
-                mesh = new MeshData(Objects.requireNonNull(buffer.build()), new MeshData.DrawState(
-                        DefaultVertexFormat.POSITION_COLOR, totalBytes / VERTEX_SIZE, maxIndexCount,
-                        VertexFormat.Mode.QUADS, VertexFormat.IndexType.least(maxVertexCount)));
-            } catch (Throwable error) {
-                buffer.close();
-                throw error;
+        // Multi-draw reuses quad indices from zero with a different base vertex per chunk.
+        PageData data = new PageData(snapshot, baseVertices, indexCounts, totalBytes, new MeshData.DrawState(
+                DefaultVertexFormat.POSITION_COLOR, totalBytes / VERTEX_SIZE, maxIndexCount,
+                VertexFormat.Mode.QUADS, VertexFormat.IndexType.least(maxVertexCount)));
+        if (totalBytes == 0) return new PageBuild(data, null);
+        assemblingBytes = totalBytes;
+        ByteBufferBuilder buffer = new ByteBufferBuilder(totalBytes);
+        try {
+            ByteBuffer target = MemoryUtil.memByteBuffer(buffer.reserve(totalBytes), totalBytes);
+            for (byte[] geometry : snapshot.geometry) {
+                if (geometry != null) target.put(geometry);
             }
-        }
-        return new PageBuild(snapshot, baseVertices, indexCounts, maxIndexCount, totalBytes, buffer, mesh);
-    }
-
-    private void uploadReady() {
-        for (int uploaded = 0; uploaded < MAX_UPLOADS_PER_FRAME; ) {
-            Page page = uploadQueue.poll();
-            if (page == null) return;
-            PageBuild build = page.takeReady();
-            if (build == null) continue;
-            uploaded++;
-            try (build) {
-                long oldBytes = page.gpuBytes;
-                page.install(build);
-                gpuBytes += page.gpuBytes - oldBytes;
-            }
+            return new PageBuild(data, buffer);
+        } catch (Throwable error) {
+            buffer.close();
+            throw error;
         }
     }
 
-    private void pruneUnusedPages(List<LodChunkMesh> visible) {
-        long now = System.nanoTime();
-        if (previousViewport != null && now - lastPruneNanos < PRUNE_INTERVAL_NANOS) return;
+    private void uploadReady(Plan plan) {
+        for (int checked = 0; checked < plan.neededPages.size(); checked++) {
+            uploadCursor %= plan.neededPages.size();
+            Page page = plan.neededPages.get(uploadCursor++);
+            if (page.upload(plan.drawPages.getOrDefault(page, List.of()))) return;
+        }
+    }
+
+    private synchronized void pruneUnusedPages(long now) {
+        if (now - lastPruneNanos < PRUNE_INTERVAL_NANOS) return;
         lastPruneNanos = now;
-
-        Set<ChunkLodProcessor.CacheKey> viewport = LodChunkMeshManager.INSTANCE.viewport();
-        boolean changed = viewport != previousViewport || !previousVisible.equals(visible);
-        if (changed) {
-            pruningViewport.clear();
-            pruningViewport.addAll(viewport);
-            for (LodChunkMesh mesh : visible) pruningViewport.add(mesh.key());
-
-            neededPages.clear();
-            for (ChunkLodProcessor.CacheKey key : pruningViewport) {
-                neededPages.add(new PageKey(key.dimension(), key.lod(),
-                        Math.floorDiv(key.chunkX(), PAGE_SIZE), Math.floorDiv(key.chunkZ(), PAGE_SIZE)));
-            }
-            previousViewport = viewport;
-            previousVisible.clear();
-            previousVisible.addAll(visible);
-        }
-
         for (Page page : pages.values()) {
-            if (page.lastDrawFrame != frame && !neededPages.contains(page.key)) {
-                if (pages.remove(page.key, page)) {
-                    gpuBytes -= page.gpuBytes;
-                    page.close();
-                }
-            } else if (changed) {
-                page.prune(pruningViewport);
+            if (now - page.lastUsedNanos >= PRUNE_INTERVAL_NANOS && pages.remove(page.key, page)) {
+                page.close();
             }
         }
     }
@@ -272,174 +215,156 @@ public final class LodChunkPageManager {
     }
 
     private record Snapshot(long revision, LodChunkMesh[] chunks, byte[][] geometry) {
+        boolean matches(Snapshot other) {
+            if (other == null || revision != other.revision) return false;
+            for (int slot = 0; slot < SLOTS; slot++) {
+                if (chunks[slot] != other.chunks[slot] || geometry[slot] != other.geometry[slot]) {
+                    return false;
+                }
+            }
+            return true;
+        }
     }
 
-    private record PageBuild(
+    private record PageData(
             Snapshot snapshot,
             int[] baseVertices,
             int[] indexCounts,
-            int maxIndexCount,
             int bytes,
-            ByteBufferBuilder buffer,
-            MeshData mesh
-    ) implements AutoCloseable {
+            MeshData.DrawState drawState
+    ) {
+    }
+
+    private record PageBuild(PageData data, ByteBufferBuilder buffer) implements AutoCloseable {
 
         @Override
         public void close() {
-            if (mesh != null) mesh.close();
-            if (buffer != null) buffer.close();
+            if (buffer != null) {
+                buffer.close();
+            }
         }
     }
 
     private final class Page {
         final PageKey key;
-        final LodChunkMesh[] chunks = new LodChunkMesh[SLOTS];
-        final byte[][] geometry = new byte[SLOTS][];
-        final LodChunkMesh[] installedChunks = new LodChunkMesh[SLOTS];
-        final Matrix4f localMv = new Matrix4f();
-        final IntBuffer counts = BufferUtils.createIntBuffer(SLOTS);
-        final IntBuffer bases = BufferUtils.createIntBuffer(SLOTS);
-        final PointerBuffer offsets = BufferUtils.createPointerBuffer(SLOTS);
-
-        int[] baseVertices = new int[SLOTS];
-        int[] indexCounts = new int[SLOTS];
-        int maxIndexCount;
-        int gpuBytes;
-        long lastDrawFrame = -1;
-        long revision;
-        boolean queued;
+        volatile long lastUsedNanos;
         boolean building;
         boolean closed;
-        PageBuild ready;
+        volatile PageData uploaded;
+        volatile PageBuild ready;
         VertexBuffer vertexBuffer;
 
         Page(PageKey key) {
             this.key = key;
         }
 
-        synchronized long readyBytes() {
-            return ready == null ? 0 : ready.bytes;
+        long readyBytes() {
+            PageBuild build = ready;
+            return build == null ? 0 : build.data.bytes;
         }
 
-        synchronized void prune(Set<ChunkLodProcessor.CacheKey> keep) {
-            boolean changed = false;
-            for (int slot = 0; slot < SLOTS; slot++) {
-                LodChunkMesh chunk = chunks[slot];
-                if (chunk != null && !keep.contains(chunk.key())) {
-                    chunk.onPageEvicted();
-                    installedChunks[slot] = null;
-                    chunks[slot] = null;
-                    geometry[slot] = null;
-                    changed = true;
+        synchronized void update(List<LodChunkMesh> meshes) {
+            if (closed || building || ready != null) return;
+
+            LodChunkMesh[] chunks = new LodChunkMesh[SLOTS];
+            byte[][] geometry = new byte[SLOTS][];
+            long revision = 0;
+            boolean hasGeometry = false;
+            for (LodChunkMesh mesh : meshes) {
+                int slot = slot(mesh);
+                long meshRevision = mesh.copyGeometry(geometry, slot);
+                if (geometry[slot] == null && uploaded != null && uploaded.snapshot.chunks[slot] == mesh) {
+                    geometry[slot] = uploaded.snapshot.geometry[slot];
                 }
+                if (geometry[slot] == null) continue;
+                chunks[slot] = mesh;
+                hasGeometry = true;
+                revision += HashCommon.mix(meshRevision ^ HashCommon.mix((long) slot));
             }
-            if (changed) {
-                revision++;
-                queueBuild();
-            }
-        }
 
-        synchronized boolean offer(LodChunkMesh chunk, byte[] data) {
-            if (closed) return false;
-            int slot = slot(chunk);
-            if (chunks[slot] == chunk && geometry[slot] == data) return true;
-            chunks[slot] = chunk;
-            geometry[slot] = data;
-            revision++;
-            queueBuild();
-            return true;
-        }
+            Snapshot snapshot = new Snapshot(revision, chunks, geometry);
+            if (snapshot.matches(uploaded == null ? null : uploaded.snapshot)) return;
+            if (!hasGeometry && uploaded == null) return;
 
-        private synchronized void queueBuild() {
-            if (!closed && !queued && !building) {
-                queued = true;
-                buildExecutor.execute(() -> buildPage(this));
-            }
-        }
-
-        synchronized Snapshot snapshot() {
-            queued = false;
-            if (closed || building) return null;
             building = true;
-            return new Snapshot(revision, chunks.clone(), geometry.clone());
+            buildExecutor.execute(() -> build(snapshot));
         }
 
-        synchronized void built(PageBuild build) {
-            building = false;
-            if (closed) {
-                build.close();
-                queueBuild();
-                return;
+        private void build(Snapshot snapshot) {
+            PageBuild build;
+            try {
+                build = assemble(snapshot);
+            } finally {
+                assemblingBytes = 0;
             }
-            if (ready != null) ready.close();
-            ready = build;
-            uploadQueue.offer(this);
-            if (revision != build.snapshot.revision) queueBuild();
+            synchronized (this) {
+                building = false;
+                if (closed) {
+                    build.close();
+                } else {
+                    ready = build;
+                }
+            }
         }
 
-        synchronized PageBuild takeReady() {
-            PageBuild result = ready;
+        synchronized boolean upload(List<LodChunkMesh> selected) {
+            PageBuild build = ready;
+            if (build == null) return false;
+
             ready = null;
-            if (result == null) return null;
-            if (closed) {
-                result.close();
-                queueBuild();
-                return null;
-            }
-            return result;
-        }
+            try (build) {
+                // Keep the uploaded cut covered while replacing its page buffer.
+                for (LodChunkMesh mesh : selected) {
+                    int slot = slot(mesh);
+                    if (uploaded != null && uploaded.snapshot.chunks[slot] == mesh
+                            && build.data.snapshot.chunks[slot] != mesh) {
+                        return false;
+                    }
+                }
 
-        synchronized void install(PageBuild build) {
-            if (closed) return;
-            VertexBuffer next = null;
-            if (build.mesh != null) {
-                next = new VertexBuffer(VertexBuffer.Usage.STATIC);
-                try {
-                    next.bind();
-                    next.upload(build.mesh);
-                } catch (Throwable error) {
-                    next.close();
-                    throw error;
-                } finally {
-                    VertexBuffer.unbind();
+                if (build.buffer != null) {
+                    if (vertexBuffer == null) {
+                        vertexBuffer = new VertexBuffer(VertexBuffer.Usage.STATIC);
+                    }
+                    try {
+                        vertexBuffer.bind();
+                        vertexBuffer.upload(new MeshData(Objects.requireNonNull(build.buffer.build()), build.data.drawState));
+                    } catch (Throwable error) {
+                        close();
+                        throw error;
+                    } finally {
+                        VertexBuffer.unbind();
+                    }
+                } else if (vertexBuffer != null) {
+                    vertexBuffer.close();
+                    vertexBuffer = null;
                 }
-            }
-            if (vertexBuffer != null) vertexBuffer.close();
-            vertexBuffer = next;
-            gpuBytes = build.bytes;
-            baseVertices = build.baseVertices;
-            indexCounts = build.indexCounts;
-            maxIndexCount = build.maxIndexCount;
-            for (int slot = 0; slot < SLOTS; slot++) {
-                LodChunkMesh previous = installedChunks[slot];
-                LodChunkMesh current = build.snapshot.chunks[slot];
-                if (chunks[slot] != current) {
-                    current = null;
-                }
-                if (previous != null && previous != current) previous.onPageEvicted();
-                installedChunks[slot] = current;
-                if (current != null) current.onPageUploaded(build.snapshot.geometry[slot]);
+
+                gpuBytes += build.data.bytes - (uploaded == null ? 0 : uploaded.bytes);
+                uploaded = build.data;
+                return true;
             }
         }
 
         void draw(List<LodChunkMesh> selected, Matrix4f mv, Matrix4f proj, ShaderInstance shader, float focusX, float focusZ) {
-            if (vertexBuffer == null) return;
+            if (vertexBuffer == null || closed) return;
             counts.clear();
             bases.clear();
-            offsets.clear();
+
             for (LodChunkMesh chunk : selected) {
                 int slot = slot(chunk);
-                if (installedChunks[slot] != chunk) continue;
-                int indexCount = indexCounts[slot];
+                if (uploaded.snapshot.chunks[slot] != chunk) continue;
+                byte[] geometry = chunk.geometry();
+                if (geometry != null && geometry.length == 0) continue;
+                int indexCount = uploaded.indexCounts[slot];
                 if (indexCount == 0) continue;
                 counts.put(indexCount);
-                bases.put(baseVertices[slot]);
-                offsets.put(0L);
+                bases.put(uploaded.baseVertices[slot]);
             }
+
             if (counts.position() == 0) return;
             counts.flip();
             bases.flip();
-            offsets.flip();
 
             float scale = 1 << key.lod;
             shader.safeGetUniform("MapOffset").set(
@@ -450,9 +375,10 @@ public final class LodChunkPageManager {
                     .scale(scale, scale, scale);
 
             vertexBuffer.bind();
+
             try {
                 RenderSystem.AutoStorageIndexBuffer indices = RenderSystem.getSequentialBuffer(VertexFormat.Mode.QUADS);
-                indices.bind(maxIndexCount);
+                indices.bind(uploaded.drawState.indexCount());
                 shader.setDefaultUniforms(VertexFormat.Mode.QUADS, localMv, proj, Minecraft.getInstance().getWindow());
                 shader.apply();
                 try {
@@ -476,16 +402,8 @@ public final class LodChunkPageManager {
                 vertexBuffer.close();
                 vertexBuffer = null;
             }
-            for (LodChunkMesh chunk : installedChunks) {
-                if (chunk != null) chunk.onPageEvicted();
-            }
-            Arrays.fill(installedChunks, null);
-            Arrays.fill(chunks, null);
-            Arrays.fill(geometry, null);
-        }
-
-        private int slot(LodChunkMesh chunk) {
-            return Math.floorMod(chunk.chunkX, PAGE_SIZE) * PAGE_SIZE + Math.floorMod(chunk.chunkZ, PAGE_SIZE);
+            gpuBytes -= uploaded == null ? 0 : uploaded.bytes;
+            uploaded = null;
         }
     }
 }

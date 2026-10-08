@@ -66,7 +66,9 @@ public final class PriorityThreadPoolExecutor extends ThreadPoolExecutor {
     public List<Runnable> shutdownNow() {
         List<Runnable> queued = super.shutdownNow();
         for (Runnable task : queued) {
-            if (task instanceof PrioritizedTask prioritized) prioritized.cancel();
+            if (task instanceof PrioritizedTask prioritized) {
+                prioritized.cancel();
+            }
         }
         return queued;
     }
@@ -120,7 +122,9 @@ public final class PriorityThreadPoolExecutor extends ThreadPoolExecutor {
 
         @Override
         public void run() {
-            if (future == null || !future.isDone()) task.run();
+            if (future == null || !future.isDone()) {
+                task.run();
+            }
         }
     }
 }

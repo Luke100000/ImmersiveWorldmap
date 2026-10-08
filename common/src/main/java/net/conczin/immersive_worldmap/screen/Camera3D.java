@@ -191,32 +191,17 @@ public class Camera3D {
 
     public boolean keyReleased(int keyCode) {
         switch (keyCode) {
-            case KEY_W, KEY_UP -> {
-                keyW = false;
-                return true;
-            }
-            case KEY_S, KEY_DOWN -> {
-                keyS = false;
-                return true;
-            }
-            case KEY_A, KEY_LEFT -> {
-                keyA = false;
-                return true;
-            }
-            case KEY_D, KEY_RIGHT -> {
-                keyD = false;
-                return true;
-            }
-            case KEY_Q -> {
-                keyQ = false;
-                return true;
-            }
-            case KEY_E -> {
-                keyE = false;
-                return true;
+            case KEY_W, KEY_UP -> keyW = false;
+            case KEY_S, KEY_DOWN -> keyS = false;
+            case KEY_A, KEY_LEFT -> keyA = false;
+            case KEY_D, KEY_RIGHT -> keyD = false;
+            case KEY_Q -> keyQ = false;
+            case KEY_E -> keyE = false;
+            default -> {
+                return false;
             }
         }
-        return false;
+        return true;
     }
 
     public float getSmoothTargetX() {
@@ -260,7 +245,7 @@ public class Camera3D {
         velYaw = velPitch = 0f;
     }
 
-    public void applyPan(float dx, float dy, int screenW, int screenH) {
+    private void applyPan(float dx, float dy, int screenW, int screenH) {
         float yr = (float) Math.toRadians(smoothYaw);
         float cosY = (float) Math.cos(yr);
         float sinY = (float) Math.sin(yr);

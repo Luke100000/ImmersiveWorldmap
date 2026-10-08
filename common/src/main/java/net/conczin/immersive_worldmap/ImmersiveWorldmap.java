@@ -12,10 +12,6 @@ public class ImmersiveWorldmap {
     public static final String MOD_NAME = "Immersive Worldmap";
     public static final Logger LOGGER = LoggerFactory.getLogger(MOD_NAME);
 
-    public static void init() {
-        // No-op
-    }
-
     public static ResourceLocation locate(String path) {
         return ResourceLocation.fromNamespaceAndPath(MOD_ID, path);
     }

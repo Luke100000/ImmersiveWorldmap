@@ -11,6 +11,7 @@ import net.conczin.immersive_worldmap.renderer.LodChunkPageManager;
 import net.conczin.immersive_worldmap.renderer.LodChunkVisibilitySelector;
 import net.conczin.immersive_worldmap.renderer.MapMemoryTracker;
 import net.conczin.immersive_worldmap.settings.SharedSettings;
+import net.conczin.immersive_worldmap.util.TickLruCache;
 import net.minecraft.client.Minecraft;
 import net.minecraft.client.gui.GuiGraphics;
 import net.minecraft.client.gui.components.PlayerFaceRenderer;
@@ -36,7 +37,6 @@ import java.util.Set;
 
 public class LodViewerScreen extends Screen {
     private static final ResourceLocation PLAYER_FACING_ARROW = ImmersiveWorldmap.locate("textures/gui/player_facing_arrow.png");
-    private static final int KEY_ESCAPE = 256;
     private static final int PLAYER_MARKER_SIZE = 16;
     private static final int OVERLAY_PADDING = 4;
     private static final int MAX_CAVE_AIR_BLOCKS = 64;
@@ -199,12 +199,14 @@ public class LodViewerScreen extends Screen {
         if (keyCode == GLFW.GLFW_KEY_SPACE) {
             if (heldKeys.add(keyCode)) {
                 playerFacingYaw = !playerFacingYaw;
-                camera.setRotation(playerFacingYaw ? -minecraft.player.getYRot() : DEFAULT_YAW, camera.getSmoothPitch());
+                if (minecraft.player != null) {
+                    camera.setRotation(playerFacingYaw ? -minecraft.player.getYRot() : DEFAULT_YAW, camera.getSmoothPitch());
+                }
             }
             return true;
         }
 
-        if (keyCode != KEY_ESCAPE && camera.keyPressed(keyCode)) {
+        if (camera.keyPressed(keyCode)) {
             return true;
         }
 
@@ -254,7 +256,7 @@ public class LodViewerScreen extends Screen {
         float openingBonus = 1f - openingProgress * openingProgress * (3f - 2f * openingProgress);
 
         camera.tick();
-        LodChunkMeshManager.tick();
+        TickLruCache.tick();
 
         float zoom = camera.getSmoothZoom() * (1f + 0.3f * openingBonus);
         float yawDegrees = camera.getSmoothYaw() + 10f * openingBonus;
@@ -321,7 +323,7 @@ public class LodViewerScreen extends Screen {
 
         if (minecraft.getDebugOverlay().showDebugScreen()) {
             int tasks = ChunkLodProcessor.getPendingTaskCount() + LodChunkPageManager.INSTANCE.getPendingTaskCount();
-            drawOverlay(graphics, Component.translatable("screen.immersive_worldmap.tasks", tasks).getVisualOrderText(), 20, 20);
+            drawOverlay(graphics, Component.translatable("screen.immersive_worldmap.tasks", tasks).getVisualOrderText(), 20);
             var cacheText = Component.translatable("screen.immersive_worldmap.cache.colors", MapMemoryTracker.colorCacheSize())
                     .append(" | ").append(Component.translatable("screen.immersive_worldmap.cache.cpu",
                             MapMemoryTracker.cpuCacheSize(), MapMemoryTracker.cpuCacheBudget()))
@@ -330,7 +332,7 @@ public class LodViewerScreen extends Screen {
                     .append(" | ").append(Component.translatable("screen.immersive_worldmap.cache.recording", MapMemoryTracker.recordingQueueSize()));
             int cacheY = 20 + font.lineHeight + OVERLAY_PADDING * 2 + 2;
             for (FormattedCharSequence line : font.split(cacheText, Math.max(1, width - 40))) {
-                drawOverlay(graphics, line, 20, cacheY);
+                drawOverlay(graphics, line, cacheY);
                 cacheY += font.lineHeight + OVERLAY_PADDING * 2 + 2;
             }
             controlsText.append("\n").append(Component.translatable("screen.immersive_worldmap.clear_dimension"))
@@ -341,14 +343,15 @@ public class LodViewerScreen extends Screen {
         int lineHeight = font.lineHeight + OVERLAY_PADDING * 2 + 2;
         int controlsY = height - 20 - (controls.size() - 1) * lineHeight;
         for (FormattedCharSequence line : controls) {
-            drawOverlay(graphics, line, 20, controlsY);
+            drawOverlay(graphics, line, controlsY);
             controlsY += lineHeight;
         }
 
         MapCompass.render(graphics, font, yawDegrees, width, height);
     }
 
-    private void drawOverlay(GuiGraphics graphics, FormattedCharSequence text, int x, int y) {
+    private void drawOverlay(GuiGraphics graphics, FormattedCharSequence text, int y) {
+        int x = 20;
         graphics.fill(x - OVERLAY_PADDING, y - OVERLAY_PADDING,
                 x + this.font.width(text) + OVERLAY_PADDING, y + this.font.lineHeight + OVERLAY_PADDING,
                 0x80000000);

@@ -3,24 +3,21 @@ package net.conczin.immersive_worldmap.renderer;
 import net.conczin.immersive_worldmap.lod.ChunkLodProcessor;
 import net.conczin.immersive_worldmap.util.ThreadPoolUtil;
 
+import java.util.concurrent.atomic.AtomicLong;
+
 public class LodChunkMesh {
+    private static final AtomicLong REVISIONS = new AtomicLong();
+
     public final int chunkX;
     public final int chunkZ;
     public final int lod;
     public final String dimension;
-
     private final ChunkLodProcessor.CacheKey key;
+
     private volatile byte[] geometry;
-    private volatile boolean dirty = true;
-    private volatile boolean requested;
-    private volatile boolean loaded;
-
-    private long revision;
-    private final long pageGeneration = LodChunkPageManager.INSTANCE.generation();
-
-    public LodChunkMesh(int chunkX, int chunkZ, int lod, String dimension) {
-        this(new ChunkLodProcessor.CacheKey(chunkX, chunkZ, dimension, lod));
-    }
+    private boolean requested;
+    private long revision = REVISIONS.incrementAndGet();
+    private long currentRevision;
 
     LodChunkMesh(ChunkLodProcessor.CacheKey key) {
         this.chunkX = key.chunkX();
@@ -28,10 +25,6 @@ public class LodChunkMesh {
         this.lod = key.lod();
         this.dimension = key.dimension();
         this.key = key;
-    }
-
-    public boolean isLoaded() {
-        return loaded;
     }
 
     ChunkLodProcessor.CacheKey key() {
@@ -42,66 +35,42 @@ public class LodChunkMesh {
         return geometry;
     }
 
-    long pageGeneration() {
-        return pageGeneration;
+    synchronized long copyGeometry(byte[][] target, int slot) {
+        target[slot] = geometry;
+        return currentRevision;
     }
 
     public void requestLoad() {
         long requestedRevision;
-        byte[] cached;
-        boolean build;
         synchronized (this) {
-            if (requested) return;
-            cached = geometry;
-            build = dirty;
+            if (requested || revision == currentRevision) return;
+            requested = true;
             requestedRevision = revision;
-            if (!build) {
-                if (loaded || cached == null) return;
-            } else {
-                requested = true;
-            }
-        }
-        if (!build) {
-            LodChunkPageManager.INSTANCE.offer(this, cached);
-            return;
         }
         ThreadPoolUtil.failOnError(LodChunkMeshBuilder.buildMeshAsync(chunkX, chunkZ, dimension, lod).whenComplete((result, error) -> {
             boolean accepted = false;
             synchronized (this) {
                 if (error == null && revision == requestedRevision) {
                     geometry = result;
-                    dirty = false;
+                    currentRevision = requestedRevision;
                     accepted = true;
                 }
                 requested = false;
             }
             if (accepted) {
                 LodChunkMeshManager.INSTANCE.geometryChanged(this);
-                LodChunkPageManager.INSTANCE.offer(this, result);
             }
         }));
     }
 
     public synchronized void markDirty() {
-        revision++;
-        dirty = true;
-    }
-
-    synchronized void onPageUploaded(byte[] uploaded) {
-        if (geometry == uploaded) loaded = true;
-    }
-
-    synchronized void onPageEvicted() {
-        if (geometry != null && geometry.length > 0) loaded = false;
+        revision = REVISIONS.incrementAndGet();
     }
 
     public void close() {
         synchronized (this) {
-            revision++;
+            revision = REVISIONS.incrementAndGet();
             geometry = null;
-            dirty = true;
-            requested = false;
-            loaded = false;
         }
         LodChunkMeshManager.INSTANCE.geometryChanged(this);
     }
