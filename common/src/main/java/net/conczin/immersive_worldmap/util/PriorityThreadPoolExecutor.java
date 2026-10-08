@@ -1,5 +1,6 @@
 package net.conczin.immersive_worldmap.util;
 
+import java.util.ArrayList;
 import java.util.List;
 import java.util.concurrent.*;
 import java.util.concurrent.atomic.AtomicLong;
@@ -44,10 +45,17 @@ public final class PriorityThreadPoolExecutor extends ThreadPoolExecutor {
     }
 
     public void discardQueuedTasksOutside(Predicate<Object> keep) {
-        getQueue().removeIf(task -> task instanceof PrioritizedTask prioritized
+        List<PrioritizedTask> discarded = new ArrayList<>();
+        getQueue().removeIf(task -> {
+            if (task instanceof PrioritizedTask prioritized
                 && prioritized.tag != null
-                && !keep.test(prioritized.tag)
-                && prioritized.cancel());
+                && !keep.test(prioritized.tag)) {
+                discarded.add(prioritized);
+                return true;
+            }
+            return false;
+        });
+        discarded.forEach(PrioritizedTask::cancel);
     }
 
     @Override
@@ -69,8 +77,10 @@ public final class PriorityThreadPoolExecutor extends ThreadPoolExecutor {
             this.task = task;
         }
 
-        private boolean cancel() {
-            return future != null && future.cancel(false);
+        private void cancel() {
+            if (future != null) {
+                future.cancel(false);
+            }
         }
 
         @Override

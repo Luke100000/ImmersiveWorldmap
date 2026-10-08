@@ -469,15 +469,5 @@ public class ChunkLodProcessor {
     }
 
     public record CacheKey(int chunkX, int chunkZ, String dimension, int lod) {
-        public boolean isWithin(String dimension, double x, double z, double radius) {
-            if (!this.dimension.equals(dimension)) return false;
-
-            long size = 16L << lod;
-            double minX = chunkX * size;
-            double minZ = chunkZ * size;
-            double dx = x - Math.clamp(x, minX, minX + size);
-            double dz = z - Math.clamp(z, minZ, minZ + size);
-            return dx * dx + dz * dz <= radius * radius;
-        }
     }
 }

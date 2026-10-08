@@ -20,7 +20,7 @@ public final class ImmersiveWorldmapClient {
     public static final KeyMapping MAP_VIEWER_KEY = new KeyMapping(
             "key.immersive_worldmap.open_lod_viewer", GLFW.GLFW_KEY_M, "category.immersive_worldmap");
 
-    private static final double RETENTION_RADIUS = LodChunkVisibilitySelector.renderRadius(225f);
+    private static final double RETENTION_RADIUS = 675;
 
     private static long closedAt;
     private static long lastMaintenance;
@@ -77,7 +77,7 @@ public final class ImmersiveWorldmapClient {
             closedZ = minecraft.player.getZ();
             closedDimension = minecraft.level.dimension().location().toString();
             closedAt = System.nanoTime();
-            keep = key -> key.lod() == 0 && key.isWithin(closedDimension, closedX, closedZ, RETENTION_RADIUS);
+            keep = key -> key.lod() == 0 && key.dimension().equals(closedDimension);
         }
         LodChunkMeshManager.INSTANCE.prune(keep);
         ChunkLodProcessor.pruneCache(keep);
