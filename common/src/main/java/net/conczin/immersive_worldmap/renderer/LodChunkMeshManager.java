@@ -14,17 +14,16 @@ public final class LodChunkMeshManager {
     public static final LodChunkMeshManager INSTANCE = new LodChunkMeshManager();
 
     private final LinkedHashMap<LodChunkMesh, Boolean> cache = new LinkedHashMap<>(256);
-    private volatile Set<ChunkLodProcessor.CacheKey> viewport = Set.of();
+    private final Set<ChunkLodProcessor.CacheKey> viewport = new ObjectOpenHashSet<>();
     private long byteBudget = 128L * 1024 * 1024;
 
     // Cache eviction must not duplicate meshes still held by a page, selection, or pending build.
     private final Map<ChunkLodProcessor.CacheKey, LodChunkMesh> liveMeshes = new MapMaker().weakValues().makeMap();
     private final Object2IntOpenHashMap<ChunkLodProcessor.CacheKey> finerGeometry = new Object2IntOpenHashMap<>();
 
-    public synchronized LodChunkMesh get(int cx, int cz, int lod, String dimension) {
-        ChunkLodProcessor.CacheKey key = new ChunkLodProcessor.CacheKey(cx, cz, dimension, lod);
+    public synchronized LodChunkMesh get(ChunkLodProcessor.CacheKey key) {
         LodChunkMesh mesh = liveMeshes.computeIfAbsent(key, LodChunkMesh::new);
-        retain(mesh);
+        cache.putLast(mesh, cache.getOrDefault(mesh, false));
         return mesh;
     }
 
@@ -58,8 +57,9 @@ public final class LodChunkMeshManager {
     }
 
     synchronized void retain(LodChunkMesh mesh) {
-        if (liveMeshes.get(mesh.key()) == mesh) {
-            cache.putLast(mesh, cache.getOrDefault(mesh, false));
+        Boolean hasGeometry = cache.get(mesh);
+        if (hasGeometry != null || liveMeshes.get(mesh.key()) == mesh) {
+            cache.putLast(mesh, Boolean.TRUE.equals(hasGeometry));
         }
     }
 
@@ -71,16 +71,13 @@ public final class LodChunkMeshManager {
         cache.clear();
         liveMeshes.clear();
         finerGeometry.clear();
-        viewport = Set.of();
+        viewport.clear();
     }
 
-    public void setViewport(Collection<LodChunkMesh> meshes) {
-        Set<ChunkLodProcessor.CacheKey> keys = new ObjectOpenHashSet<>(meshes.size());
+    public synchronized void setViewport(Collection<LodChunkMesh> meshes) {
+        viewport.clear();
         for (LodChunkMesh mesh : meshes) {
-            keys.add(mesh.key());
-        }
-        if (!keys.equals(viewport)) {
-            viewport = Collections.unmodifiableSet(keys);
+            viewport.add(mesh.key());
         }
     }
 
@@ -121,14 +118,15 @@ public final class LodChunkMeshManager {
             cache.remove(mesh);
             liveMeshes.remove(mesh.key());
         }
-        viewport = Set.of();
+        viewport.clear();
     }
 
     public synchronized void invalidate(int cx, int cz, int lod, String dimension) {
         for (int parentLod = lod; parentLod <= LodChunkData.MAX_LOD; parentLod++) {
             for (int dx = -1; dx <= 1; dx++) {
                 for (int dz = -1; dz <= 1; dz++) {
-                    LodChunkMesh mesh = liveMeshes.get(new ChunkLodProcessor.CacheKey(cx + dx, cz + dz, dimension, parentLod));
+                    ChunkLodProcessor.CacheKey key = new ChunkLodProcessor.CacheKey(cx + dx, cz + dz, dimension, parentLod);
+                    LodChunkMesh mesh = liveMeshes.get(key);
                     if (mesh == null) {
                         continue;
                     }

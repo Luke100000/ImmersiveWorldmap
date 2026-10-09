@@ -28,6 +28,7 @@ public final class MapMemoryTracker {
     private static long cpuBytes;
     private static long pageBytes;
     private static long recordingBytes;
+    private static long revision;
 
     private MapMemoryTracker() {
     }
@@ -43,6 +44,7 @@ public final class MapMemoryTracker {
         long estimated = colorBytes + pageBytes + recordingBytes;
 
         cpuBytes = LodChunkMeshManager.INSTANCE.trimToAvailableMemory(available - estimated, MIN_CACHE_BYTES);
+        revision++;
     }
 
     private static long heapUsedAfterGc(Runtime runtime) {
@@ -82,6 +84,10 @@ public final class MapMemoryTracker {
 
     public static String recordingQueueSize() {
         return formatBytes(recordingBytes);
+    }
+
+    public static long revision() {
+        return revision;
     }
 
     private static String formatBytes(long bytes) {

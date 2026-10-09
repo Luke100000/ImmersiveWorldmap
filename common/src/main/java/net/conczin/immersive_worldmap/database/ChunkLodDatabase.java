@@ -126,10 +126,10 @@ public class ChunkLodDatabase implements AutoCloseable {
      * @param z         the z coordinate
      * @param dimension the dimension identifier
      * @param lod       the level of detail
-     * @param colors    the binary color data
+     * @param colors    precompressed color data, or null for an empty chunk
      * @throws SQLException if a database access error occurs
      */
-    public void upsertChunk(int x, int z, String dimension, int lod, byte[] colors, int minSurface, long chunkHash) throws SQLException {
+    public void upsertCompressedChunk(int x, int z, String dimension, int lod, byte[] colors, int minSurface, long chunkHash) throws SQLException {
         inTransaction(connection -> {
             upsertChunkRow(connection, x, z, dimension, lod, colors, minSurface, chunkHash);
             markParentsDirty(connection, x, z, dimension, lod);
@@ -187,7 +187,7 @@ public class ChunkLodDatabase implements AutoCloseable {
             pstmt.setNull(5, Types.BLOB);
             pstmt.setBoolean(7, true);
         } else {
-            pstmt.setBytes(5, CompressionUtil.compress(colors));
+            pstmt.setBytes(5, colors);
             pstmt.setBoolean(7, false);
         }
         pstmt.executeUpdate();

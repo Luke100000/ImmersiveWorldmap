@@ -64,6 +64,9 @@ public class LodChunkVisibilitySelector {
     private String selectedDimension;
 
     private final Set<ChunkLodProcessor.CacheKey> taskInterest = new ObjectOpenHashSet<>();
+    private final List<LodChunkMesh> selected = new ArrayList<>();
+    private final List<LodChunkMesh> targetMeshes = new ArrayList<>();
+    private final Set<LodChunkMesh> interested = new ObjectLinkedOpenHashSet<>();
 
     private final Thread worker;
     private volatile boolean running = true;
@@ -101,8 +104,6 @@ public class LodChunkVisibilitySelector {
 
     private LodChunkPageManager.Plan buildSelection(CameraSnapshot snapshot) {
         try {
-            List<LodChunkMesh> selected = new ArrayList<>();
-            List<LodChunkMesh> targetMeshes = new ArrayList<>();
             int targetLod = selectLod(snapshot);
             FrustumIntersection frustum = new FrustumIntersection(snapshot.viewProjection());
             double radius = snapshot.radius() + 1;
@@ -120,7 +121,7 @@ public class LodChunkVisibilitySelector {
 
             Comparator<LodChunkMesh> byDistance = Comparator.comparingDouble(mesh -> distanceSquared(mesh, snapshot));
             targetMeshes.sort(byDistance);
-            Set<LodChunkMesh> interested = new ObjectLinkedOpenHashSet<>(targetMeshes);
+            interested.addAll(targetMeshes);
             interested.addAll(selected);
             LodChunkMeshManager.INSTANCE.setViewport(interested);
 
@@ -137,6 +138,9 @@ public class LodChunkVisibilitySelector {
             return LodChunkPageManager.INSTANCE.prepare(interested, selected);
         } finally {
             taskInterest.clear();
+            selected.clear();
+            targetMeshes.clear();
+            interested.clear();
         }
     }
 
@@ -180,7 +184,7 @@ public class LodChunkVisibilitySelector {
         ChunkLodProcessor.CacheKey key = new ChunkLodProcessor.CacheKey(chunkX, chunkZ, snapshot.dimension(), lod);
         LodChunkMesh mesh;
         if (lod == targetLod) {
-            mesh = LodChunkMeshManager.INSTANCE.get(chunkX, chunkZ, lod, snapshot.dimension());
+            mesh = LodChunkMeshManager.INSTANCE.get(key);
             targetMeshes.add(mesh);
         } else {
             mesh = LodChunkMeshManager.INSTANCE.find(key);

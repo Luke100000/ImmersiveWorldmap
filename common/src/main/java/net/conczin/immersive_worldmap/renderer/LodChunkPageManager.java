@@ -3,6 +3,7 @@ package net.conczin.immersive_worldmap.renderer;
 import com.mojang.blaze3d.systems.RenderSystem;
 import com.mojang.blaze3d.vertex.*;
 import it.unimi.dsi.fastutil.HashCommon;
+import it.unimi.dsi.fastutil.objects.ObjectLinkedOpenHashSet;
 import net.conczin.immersive_worldmap.screen.MapBackgroundTexture;
 import net.conczin.immersive_worldmap.util.PooledBytes;
 import net.conczin.immersive_worldmap.util.PriorityThreadPoolExecutor;
@@ -22,7 +23,7 @@ import java.util.*;
 import java.util.concurrent.ConcurrentHashMap;
 
 public final class LodChunkPageManager {
-    public static final int PAGE_SIZE = 16;
+    public static final int PAGE_SIZE = 8;
     public static final String SHADER_NAME = "immersive_worldmap_map";
 
     private static final int SLOTS = PAGE_SIZE * PAGE_SIZE;
@@ -33,6 +34,7 @@ public final class LodChunkPageManager {
     public static final LodChunkPageManager INSTANCE = new LodChunkPageManager();
 
     private final Map<PageKey, Page> pages = new ConcurrentHashMap<>();
+    private final Set<Page> inputPages = new ObjectLinkedOpenHashSet<>();
     private final PriorityThreadPoolExecutor buildExecutor =
             ThreadPoolUtil.createLowPriorityFixedThreadPool("ImmersiveWorldmap-PageBuilder", 1);
 
@@ -63,24 +65,31 @@ public final class LodChunkPageManager {
 
     synchronized Plan prepare(Collection<LodChunkMesh> interested, List<LodChunkMesh> visible) {
         if (!active) return Plan.EMPTY;
-        Map<Page, List<LodChunkMesh>> inputs = new LinkedHashMap<>();
-        long now = System.nanoTime();
-        for (LodChunkMesh mesh : interested) {
-            Page page = pages.computeIfAbsent(key(mesh), Page::new);
-            page.lastUsedNanos = now;
-            inputs.computeIfAbsent(page, ignored -> new ArrayList<>()).add(mesh);
-        }
-        for (Map.Entry<Page, List<LodChunkMesh>> entry : inputs.entrySet()) {
-            entry.getKey().update(entry.getValue());
-        }
+        try {
+            long now = System.nanoTime();
+            for (LodChunkMesh mesh : interested) {
+                Page page = pages.computeIfAbsent(key(mesh), Page::new);
+                page.lastUsedNanos = now;
+                inputPages.add(page);
+                page.inputs.add(mesh);
+            }
+            for (Page page : inputPages) {
+                page.update(page.inputs);
+            }
 
-        Map<Page, List<LodChunkMesh>> batches = new LinkedHashMap<>();
-        for (LodChunkMesh mesh : visible) {
-            Page page = pages.get(key(mesh));
-            batches.computeIfAbsent(page, ignored -> new ArrayList<>()).add(mesh);
+            Map<Page, List<LodChunkMesh>> batches = new LinkedHashMap<>();
+            for (LodChunkMesh mesh : visible) {
+                Page page = pages.get(key(mesh));
+                batches.computeIfAbsent(page, ignored -> new ArrayList<>()).add(mesh);
+            }
+            batches.replaceAll((page, meshes) -> List.copyOf(meshes));
+            return new Plan(Collections.unmodifiableMap(batches), List.copyOf(inputPages));
+        } finally {
+            for (Page page : inputPages) {
+                page.inputs.clear();
+            }
+            inputPages.clear();
         }
-        batches.replaceAll((page, meshes) -> List.copyOf(meshes));
-        return new Plan(Collections.unmodifiableMap(batches), List.copyOf(inputs.keySet()));
     }
 
     public void draw(Plan plan, Matrix4f mv, Matrix4f proj, float focusX, float focusZ,
@@ -139,7 +148,7 @@ public final class LodChunkPageManager {
     }
 
     public long getEstimatedRamBytes() {
-        return pages.size() * 16L * 1024 + assemblingBytes + pages.values().stream().mapToLong(Page::readyBytes).sum();
+        return pages.size() * SLOTS * 64L + assemblingBytes + pages.values().stream().mapToLong(Page::readyBytes).sum();
     }
 
     private static int slot(LodChunkMesh mesh) {
@@ -248,6 +257,7 @@ public final class LodChunkPageManager {
 
     private final class Page {
         final PageKey key;
+        final List<LodChunkMesh> inputs = new ArrayList<>();
         volatile long lastUsedNanos;
         boolean building;
         boolean closed;
@@ -318,7 +328,7 @@ public final class LodChunkPageManager {
                 for (LodChunkMesh mesh : selected) {
                     int slot = slot(mesh);
                     if (uploaded != null && uploaded.snapshot.chunks[slot] == mesh
-                            && build.data.snapshot.chunks[slot] != mesh) {
+                        && build.data.snapshot.chunks[slot] != mesh) {
                         return false;
                     }
                 }
@@ -343,8 +353,8 @@ public final class LodChunkPageManager {
 
                 gpuBytes += build.data.bytes - (uploaded == null ? 0 : uploaded.bytes);
                 uploaded = build.data;
-                return true;
             }
+            return true;
         }
 
         void draw(List<LodChunkMesh> selected, Matrix4f mv, Matrix4f proj, ShaderInstance shader, float focusX, float focusZ) {

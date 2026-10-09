@@ -84,15 +84,11 @@ public class LodChunkMeshBuilder {
             float sideEWBrightness = 0.72F; // 0.8 * 0.9
             boolean hasFaces = false;
 
-            // Iterate through all blocks and render visible faces
             for (int x = 0; x < 16; x++) {
-                for (int y = floor; y < height; y++) {
-                    for (int z = 0; z < 16; z++) {
-                        if (slice != null && y > slice.centerCut(x, z)) {
-                            // Cave view: everything above the column's slice is hidden
-                            continue;
-                        }
+                for (int z = 0; z < 16; z++) {
+                    int cut = slice == null ? height - 1 : Math.min(height - 1, slice.centerCut(x, z));
 
+                    for (int y = floor; y <= cut; y++) {
                         byte blockColorId = center.getBlock(x, y, z);
                         if (blockColorId == 0) {
                             continue; // Skip air blocks (MapColor.NONE has id 0)
@@ -120,7 +116,7 @@ public class LodChunkMeshBuilder {
                         g = Math.clamp(g + noise, 0, 255);
                         b = Math.clamp(b + noise, 0, 255);
 
-                        float topMul = (slice != null && y == slice.centerCut(x, z) && center.getBlock(x, y + 1, z) != 0)
+                        float topMul = (slice != null && y == cut && center.getBlock(x, y + 1, z) != 0)
                                 ? CAVE_TOP_BRIGHTNESS : 1.0F;
 
                         // Pre-calculate brightness-adjusted colors for each face direction

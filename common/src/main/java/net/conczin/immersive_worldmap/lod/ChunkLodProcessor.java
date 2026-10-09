@@ -4,6 +4,7 @@ import it.unimi.dsi.fastutil.HashCommon;
 import net.conczin.immersive_worldmap.database.ChunkLodDatabase;
 import net.conczin.immersive_worldmap.database.DatabaseManager;
 import net.conczin.immersive_worldmap.util.ChunkHash;
+import net.conczin.immersive_worldmap.util.CompressionUtil;
 import net.conczin.immersive_worldmap.util.PooledBytes;
 import net.conczin.immersive_worldmap.util.PriorityThreadPoolExecutor;
 import net.conczin.immersive_worldmap.util.ThreadPoolUtil;
@@ -32,7 +33,7 @@ public class ChunkLodProcessor {
     private static volatile Consumer<CacheKey> invalidationListener = key -> {
     };
 
-    private static final TickLruCache<CacheKey, LodChunkData> LOD_CACHE = new TickLruCache<>(256);
+    private static final TickLruCache<CacheKey, LodChunkData> LOD_CACHE = new TickLruCache<>(1024);
     private static final Object LOD_LOCK = new Object();
     private static final Map<CacheKey, LodRequest> IN_FLIGHT = new HashMap<>();
     private static final Map<CacheKey, ChunkSnapshot> CHUNK_INGESTS = new ConcurrentHashMap<>();
@@ -205,10 +206,12 @@ public class ChunkLodProcessor {
         }
 
         int minSurface = chunkData == null ? 0 : findMinSurface(chunkData);
+        byte[] compressed = chunkData == null ? null : CompressionUtil.compress(chunkData);
+
         synchronized (LOD_LOCK) {
             // An older queued snapshot must not overwrite a newer full or partial update.
             if (CHUNK_INGESTS.get(key) == revision) {
-                upsertChunkData(key, chunkData, minSurface, chunkHash, null, 0);
+                upsertCompressedChunkData(key, compressed, minSurface, chunkHash, null, 0);
             }
         }
     }
@@ -232,14 +235,14 @@ public class ChunkLodProcessor {
         return min;
     }
 
-    private static void upsertChunkData(CacheKey key, byte[] data, int minSurface, long chunkHash, LodRequest request, long revision) {
+    private static void upsertCompressedChunkData(CacheKey key, byte[] data, int minSurface, long chunkHash, LodRequest request, long revision) {
         synchronized (LOD_LOCK) {
             // A source may have changed while the LOD's children were being loaded or downsampled.
             if (request != null && (IN_FLIGHT.get(key) != request || request.revision != revision)) {
                 return;
             }
             try {
-                DatabaseManager.getInstance().upsertChunk(key.chunkX(), key.chunkZ(), key.dimension(), key.lod(), data, minSurface, chunkHash);
+                DatabaseManager.getInstance().upsertCompressedChunk(key.chunkX(), key.chunkZ(), key.dimension(), key.lod(), data, minSurface, chunkHash);
                 int x = key.chunkX();
                 int z = key.chunkZ();
                 for (int lod = key.lod(); lod <= LodChunkData.MAX_LOD; lod++) {
@@ -283,7 +286,7 @@ public class ChunkLodProcessor {
             ChunkLodDatabase database = DatabaseManager.getInstance();
             ChunkLodDatabase.StoredChunk stored = database.loadChunk(key.chunkX(), key.chunkZ(), key.dimension(), key.lod());
             if (!stored.exists() && key.lod() > 0 && !database.hasRecordedChunks(key.chunkX(), key.chunkZ(), key.dimension(), key.lod())) {
-                upsertChunkData(key, null, 0, 0L, request, revision);
+                upsertCompressedChunkData(key, null, 0, 0L, request, revision);
                 return new ChunkLodDatabase.StoredChunk(true, null, false, 0);
             }
             return stored;
@@ -309,14 +312,15 @@ public class ChunkLodProcessor {
         }
         return CompletableFuture.allOf(sources.toArray(CompletableFuture[]::new)).thenCompose(ignored -> {
             if (sources.stream().map(CompletableFuture::join).allMatch(LodChunkData::empty)) {
-                upsertChunkData(key, null, 0, 0L, request, revision);
+                upsertCompressedChunkData(key, null, 0, 0L, request, revision);
                 return CompletableFuture.completedFuture(new LodChunkData(key.chunkX(), key.chunkZ(), key.dimension(), key.lod(), null, 0));
             }
             return EXECUTOR.submit(key.lod(), key, () -> {
                 LodChunkData[][] data = {{sources.get(0).join(), sources.get(2).join()}, {sources.get(1).join(), sources.get(3).join()}};
                 byte[] result = generateLod(data);
                 int minSurface = findMinSurface(result);
-                upsertChunkData(key, result, minSurface, 0L, request, revision);
+                byte[] compressed = CompressionUtil.compress(result);
+                upsertCompressedChunkData(key, compressed, minSurface, 0L, request, revision);
                 return new LodChunkData(key.chunkX(), key.chunkZ(), key.dimension(), key.lod(), PooledBytes.wrap(result), minSurface);
             });
         });

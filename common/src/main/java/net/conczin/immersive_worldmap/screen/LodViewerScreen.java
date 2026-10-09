@@ -33,6 +33,7 @@ import org.lwjgl.glfw.GLFW;
 import org.lwjgl.opengl.GL11;
 
 import java.util.HashSet;
+import java.util.List;
 import java.util.Set;
 
 public class LodViewerScreen extends Screen {
@@ -52,6 +53,11 @@ public class LodViewerScreen extends Screen {
 
     private final Set<Integer> heldKeys = new HashSet<>();
 
+    private List<FormattedCharSequence> controlsLines;
+    private boolean controlsDebug;
+    private long cacheTextRevision = -1;
+    private List<FormattedCharSequence> cacheLines = List.of();
+
     public LodViewerScreen() {
         super(Component.translatable("screen.immersive_worldmap.title"));
 
@@ -67,6 +73,15 @@ public class LodViewerScreen extends Screen {
             || (SharedSettings.caveView && (previousBaselineY != SharedSettings.caveViewBaselineY || previousWallHeight != SharedSettings.caveViewWallHeight))) {
             clearMeshes();
         }
+    }
+
+    @Override
+    protected void init() {
+        super.init();
+
+        controlsLines = null;
+        cacheLines = List.of();
+        cacheTextRevision = -1;
     }
 
     private void loadState() {
@@ -311,6 +326,45 @@ public class LodViewerScreen extends Screen {
     }
 
     private void drawDebug(GuiGraphics graphics, float yawDegrees) {
+        boolean debug = minecraft.getDebugOverlay().showDebugScreen();
+        var controls = controls(debug);
+
+        if (debug) {
+            int tasks = ChunkLodProcessor.getPendingTaskCount() + LodChunkPageManager.INSTANCE.getPendingTaskCount();
+            drawOverlay(graphics, Component.translatable("screen.immersive_worldmap.tasks", tasks).getVisualOrderText(), 20);
+            if (cacheTextRevision != MapMemoryTracker.revision()) {
+                var cacheText = Component.translatable("screen.immersive_worldmap.cache.colors", MapMemoryTracker.colorCacheSize())
+                        .append(" | ").append(Component.translatable("screen.immersive_worldmap.cache.cpu",
+                                MapMemoryTracker.cpuCacheSize(), MapMemoryTracker.cpuCacheBudget()))
+                        .append(" | ").append(Component.translatable("screen.immersive_worldmap.cache.pages",
+                                MapMemoryTracker.pageGpuSize(), MapMemoryTracker.pageRamSize()))
+                        .append(" | ").append(Component.translatable("screen.immersive_worldmap.cache.recording", MapMemoryTracker.recordingQueueSize()));
+                cacheLines = font.split(cacheText, Math.max(1, width - 40));
+                cacheTextRevision = MapMemoryTracker.revision();
+            }
+
+            int cacheY = 20 + font.lineHeight + OVERLAY_PADDING * 2 + 2;
+            for (FormattedCharSequence line : cacheLines) {
+                drawOverlay(graphics, line, cacheY);
+                cacheY += font.lineHeight + OVERLAY_PADDING * 2 + 2;
+            }
+        }
+
+        int lineHeight = font.lineHeight + OVERLAY_PADDING * 2 + 2;
+        int controlsY = height - 20 - (controls.size() - 1) * lineHeight;
+        for (FormattedCharSequence line : controls) {
+            drawOverlay(graphics, line, controlsY);
+            controlsY += lineHeight;
+        }
+
+        MapCompass.render(graphics, font, yawDegrees, width, height);
+    }
+
+    private List<FormattedCharSequence> controls(boolean debug) {
+        if (controlsLines != null && controlsDebug == debug) {
+            return controlsLines;
+        }
+
         var controlsText = Component.translatable("screen.immersive_worldmap.controls.pan_drag")
                 .append("   ").append(Component.translatable("screen.immersive_worldmap.controls.orbit_drag"))
                 .append("   ").append(Component.translatable("screen.immersive_worldmap.controls.zoom"))
@@ -321,33 +375,14 @@ public class LodViewerScreen extends Screen {
                 .append("   ").append(Component.translatable("screen.immersive_worldmap.controls.close",
                         ImmersiveWorldmapClient.MAP_VIEWER_KEY.getTranslatedKeyMessage()));
 
-        if (minecraft.getDebugOverlay().showDebugScreen()) {
-            int tasks = ChunkLodProcessor.getPendingTaskCount() + LodChunkPageManager.INSTANCE.getPendingTaskCount();
-            drawOverlay(graphics, Component.translatable("screen.immersive_worldmap.tasks", tasks).getVisualOrderText(), 20);
-            var cacheText = Component.translatable("screen.immersive_worldmap.cache.colors", MapMemoryTracker.colorCacheSize())
-                    .append(" | ").append(Component.translatable("screen.immersive_worldmap.cache.cpu",
-                            MapMemoryTracker.cpuCacheSize(), MapMemoryTracker.cpuCacheBudget()))
-                    .append(" | ").append(Component.translatable("screen.immersive_worldmap.cache.pages",
-                            MapMemoryTracker.pageGpuSize(), MapMemoryTracker.pageRamSize()))
-                    .append(" | ").append(Component.translatable("screen.immersive_worldmap.cache.recording", MapMemoryTracker.recordingQueueSize()));
-            int cacheY = 20 + font.lineHeight + OVERLAY_PADDING * 2 + 2;
-            for (FormattedCharSequence line : font.split(cacheText, Math.max(1, width - 40))) {
-                drawOverlay(graphics, line, cacheY);
-                cacheY += font.lineHeight + OVERLAY_PADDING * 2 + 2;
-            }
+        if (debug) {
             controlsText.append("\n").append(Component.translatable("screen.immersive_worldmap.clear_dimension"))
                     .append("   ").append(Component.translatable("screen.immersive_worldmap.clear_generated"));
         }
 
-        var controls = font.split(controlsText, Math.max(1, width - 80));
-        int lineHeight = font.lineHeight + OVERLAY_PADDING * 2 + 2;
-        int controlsY = height - 20 - (controls.size() - 1) * lineHeight;
-        for (FormattedCharSequence line : controls) {
-            drawOverlay(graphics, line, controlsY);
-            controlsY += lineHeight;
-        }
-
-        MapCompass.render(graphics, font, yawDegrees, width, height);
+        controlsLines = font.split(controlsText, Math.max(1, width - 80));
+        controlsDebug = debug;
+        return controlsLines;
     }
 
     private void drawOverlay(GuiGraphics graphics, FormattedCharSequence text, int y) {
