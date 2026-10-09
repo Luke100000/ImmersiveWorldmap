@@ -96,11 +96,12 @@ public final class LodChunkMeshManager {
         return byteBudget;
     }
 
-    public synchronized void trim(long budget) {
-        byteBudget = budget;
+    public synchronized long trimToAvailableMemory(long availableBytes, long minimumBudget) {
         long bytes = getEstimatedBytes();
+        long measuredBytes = bytes;
+        byteBudget = Math.max(minimumBudget, (availableBytes - bytes) / 2);
         var entries = cache.entrySet().iterator();
-        while (bytes > budget && entries.hasNext()) {
+        while (bytes > byteBudget && entries.hasNext()) {
             var entry = entries.next();
             if (viewport.contains(entry.getKey().key())) continue;
 
@@ -109,6 +110,7 @@ public final class LodChunkMeshManager {
             mesh.close();
             entries.remove();
         }
+        return measuredBytes;
     }
 
     public synchronized void prune(Predicate<ChunkLodProcessor.CacheKey> keep) {

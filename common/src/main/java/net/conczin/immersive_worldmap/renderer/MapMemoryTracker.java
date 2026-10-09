@@ -31,15 +31,14 @@ public final class MapMemoryTracker {
 
     public static void update() {
         colorBytes = ChunkLodProcessor.getColorCacheBytes();
-        cpuBytes = LodChunkMeshManager.INSTANCE.getEstimatedBytes();
         pageBytes = LodChunkPageManager.INSTANCE.getEstimatedRamBytes();
         recordingBytes = ChunkLodProcessor.getRecordingQueueBytes();
 
         Runtime runtime = Runtime.getRuntime();
         long available = runtime.maxMemory() - heapUsedAfterGc(runtime);
-        long estimated = colorBytes + cpuBytes + pageBytes + recordingBytes;
+        long estimated = colorBytes + pageBytes + recordingBytes;
 
-        LodChunkMeshManager.INSTANCE.trim(Math.max(MIN_CACHE_BYTES, (available - estimated) / 2));
+        cpuBytes = LodChunkMeshManager.INSTANCE.trimToAvailableMemory(available - estimated, MIN_CACHE_BYTES);
     }
 
     private static long heapUsedAfterGc(Runtime runtime) {

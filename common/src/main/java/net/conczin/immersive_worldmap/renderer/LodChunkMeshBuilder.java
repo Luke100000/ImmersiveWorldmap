@@ -97,6 +97,13 @@ public class LodChunkMeshBuilder {
                             continue; // Skip air blocks (MapColor.NONE has id 0)
                         }
 
+                        boolean top = neighbors.isAir(x, y + 1, z);
+                        boolean north = neighbors.isAir(x, y, z - 1);
+                        boolean south = neighbors.isAir(x, y, z + 1);
+                        boolean west = neighbors.isAir(x - 1, y, z);
+                        boolean east = neighbors.isAir(x + 1, y, z);
+                        if (!top && !north && !south && !west && !east) continue;
+
                         int[] color = ColorManager.byteToRGB(blockColorId);
                         int r = color[0];
                         int g = color[1];
@@ -133,7 +140,7 @@ public class LodChunkMeshBuilder {
                         int z1 = z + 1;
 
                         // Top face (Y+)
-                        if (neighbors.isAir(x, y + 1, z)) {
+                        if (top) {
                             hasFaces = true;
                             float ao00 = vertexAO(neighbors, x - 1, y + 1, z, x, y + 1, z - 1, x - 1, y + 1, z - 1);
                             float ao10 = vertexAO(neighbors, x + 1, y + 1, z, x, y + 1, z - 1, x + 1, y + 1, z - 1);
@@ -153,7 +160,7 @@ public class LodChunkMeshBuilder {
                         }
 
                         // North face (Z-)
-                        if (neighbors.isAir(x, y, z - 1)) {
+                        if (north) {
                             hasFaces = true;
                             float ao00 = vertexAO(neighbors, x - 1, y, z - 1, x, y - 1, z - 1, x - 1, y - 1, z - 1);
                             float ao10 = vertexAO(neighbors, x + 1, y, z - 1, x, y - 1, z - 1, x + 1, y - 1, z - 1);
@@ -173,7 +180,7 @@ public class LodChunkMeshBuilder {
                         }
 
                         // South face (Z+)
-                        if (neighbors.isAir(x, y, z + 1)) {
+                        if (south) {
                             hasFaces = true;
                             float ao00 = vertexAO(neighbors, x - 1, y, z + 1, x, y - 1, z + 1, x - 1, y - 1, z + 1);
                             float ao10 = vertexAO(neighbors, x + 1, y, z + 1, x, y - 1, z + 1, x + 1, y - 1, z + 1);
@@ -193,7 +200,7 @@ public class LodChunkMeshBuilder {
                         }
 
                         // West face (X-)
-                        if (neighbors.isAir(x - 1, y, z)) {
+                        if (west) {
                             hasFaces = true;
                             float ao00 = vertexAO(neighbors, x - 1, y, z - 1, x - 1, y - 1, z, x - 1, y - 1, z - 1);
                             float ao10 = vertexAO(neighbors, x - 1, y, z + 1, x - 1, y - 1, z, x - 1, y - 1, z + 1);
@@ -213,7 +220,7 @@ public class LodChunkMeshBuilder {
                         }
 
                         // East face (X+)
-                        if (neighbors.isAir(x + 1, y, z)) {
+                        if (east) {
                             hasFaces = true;
                             float ao00 = vertexAO(neighbors, x + 1, y, z - 1, x + 1, y - 1, z, x + 1, y - 1, z - 1);
                             float ao10 = vertexAO(neighbors, x + 1, y, z + 1, x + 1, y - 1, z, x + 1, y - 1, z + 1);
@@ -284,8 +291,8 @@ public class LodChunkMeshBuilder {
     ) {
         boolean side1 = !neighbors.isAir(sx, sy, sz);
         boolean side2 = !neighbors.isAir(cx, cy, cz);
-        boolean corner = !neighbors.isAir(ex, ey, ez);
         if (side1 && side2) return 0.5F;
+        boolean corner = !neighbors.isAir(ex, ey, ez);
         return (3 - ((side1 ? 1 : 0) + (side2 ? 1 : 0) + (corner ? 1 : 0))) / 6.0f + 0.5f;
     }
 
