@@ -5,6 +5,7 @@ import net.conczin.immersive_worldmap.lod.ChunkLodProcessor;
 import net.conczin.immersive_worldmap.lod.LodChunkData;
 import net.conczin.immersive_worldmap.settings.SharedSettings;
 import net.conczin.immersive_worldmap.util.ColorManager;
+import net.conczin.immersive_worldmap.util.PooledBytes;
 import net.conczin.immersive_worldmap.util.TesselatorPool;
 import net.conczin.immersive_worldmap.util.ThreadPoolUtil;
 
@@ -17,7 +18,7 @@ import java.util.concurrent.CompletableFuture;
  * Renders LOD chunk data as a mesh.
  */
 public class LodChunkMeshBuilder {
-    private static final byte[] EMPTY = new byte[0];
+    private static final PooledBytes EMPTY = PooledBytes.wrap(new byte[0]);
 
     // Slack kept below the floor, so a sloping surface is never cut into
     private static final int FLOOR_BUFFER = 8;
@@ -35,7 +36,7 @@ public class LodChunkMeshBuilder {
      * @param lod       LOD level
      * @return CompletableFuture containing the built vertex data
      */
-    public static CompletableFuture<byte[]> buildMeshAsync(int chunkX, int chunkZ, String dimension, int lod) {
+    public static CompletableFuture<PooledBytes> buildMeshAsync(int chunkX, int chunkZ, String dimension, int lod) {
         CompletableFuture<LodChunkData> center = ChunkLodProcessor.getLodChunkDataAsync(chunkX, chunkZ, dimension, lod);
         return ThreadPoolUtil.failOnError(center.thenCompose(centerData -> {
             if (centerData.empty()) {
@@ -56,7 +57,7 @@ public class LodChunkMeshBuilder {
     }
 
     @SuppressWarnings("DuplicatedCode")
-    private static byte[] buildMesh(ChunkNeighborhood neighbors, int lod) {
+    private static PooledBytes buildMesh(ChunkNeighborhood neighbors, int lod) {
         LodChunkData center = neighbors.center();
         if (center.empty()) return EMPTY;
 
@@ -244,8 +245,8 @@ public class LodChunkMeshBuilder {
 
             if (!hasFaces) return EMPTY;
             try (MeshData mesh = builder.buildOrThrow()) {
-                byte[] vertices = new byte[mesh.vertexBuffer().remaining()];
-                mesh.vertexBuffer().get(vertices);
+                PooledBytes vertices = PooledBytes.allocate(mesh.vertexBuffer().remaining());
+                vertices.copyFrom(mesh.vertexBuffer());
                 return vertices;
             }
         } finally {

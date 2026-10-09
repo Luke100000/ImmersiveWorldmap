@@ -4,6 +4,7 @@ import com.mojang.blaze3d.systems.RenderSystem;
 import com.mojang.blaze3d.vertex.*;
 import it.unimi.dsi.fastutil.HashCommon;
 import net.conczin.immersive_worldmap.screen.MapBackgroundTexture;
+import net.conczin.immersive_worldmap.util.PooledBytes;
 import net.conczin.immersive_worldmap.util.PriorityThreadPoolExecutor;
 import net.conczin.immersive_worldmap.util.ThreadPoolUtil;
 import net.minecraft.client.Minecraft;
@@ -111,8 +112,8 @@ public final class LodChunkPageManager {
         Page page = pages.get(key(mesh));
         PageData uploaded = page == null ? null : page.uploaded;
         if (uploaded != null && uploaded.snapshot.chunks[slot(mesh)] == mesh) return true;
-        byte[] geometry = mesh.geometry();
-        return geometry != null && geometry.length == 0;
+        PooledBytes geometry = mesh.geometry();
+        return geometry != null && geometry.length() == 0;
     }
 
     public synchronized void clear() {
@@ -157,12 +158,12 @@ public final class LodChunkPageManager {
         int maxIndexCount = 0;
         int maxVertexCount = 0;
         for (int slot = 0; slot < SLOTS; slot++) {
-            byte[] geometry = snapshot.geometry[slot];
+            PooledBytes geometry = snapshot.geometry[slot];
             baseVertices[slot] = totalBytes / VERTEX_SIZE;
-            if (geometry == null || geometry.length == 0) continue;
-            totalBytes = Math.addExact(totalBytes, geometry.length);
-            int vertices = geometry.length / VERTEX_SIZE;
-            int indices = geometry.length / QUAD_SIZE * 6;
+            if (geometry == null || geometry.length() == 0) continue;
+            totalBytes = Math.addExact(totalBytes, geometry.length());
+            int vertices = geometry.length() / VERTEX_SIZE;
+            int indices = geometry.length() / QUAD_SIZE * 6;
             maxVertexCount = Math.max(maxVertexCount, vertices);
             maxIndexCount = Math.max(maxIndexCount, indices);
             indexCounts[slot] = indices;
@@ -177,8 +178,8 @@ public final class LodChunkPageManager {
         ByteBufferBuilder buffer = new ByteBufferBuilder(totalBytes);
         try {
             ByteBuffer target = MemoryUtil.memByteBuffer(buffer.reserve(totalBytes), totalBytes);
-            for (byte[] geometry : snapshot.geometry) {
-                if (geometry != null) target.put(geometry);
+            for (PooledBytes geometry : snapshot.geometry) {
+                if (geometry != null) geometry.copyTo(target);
             }
             return new PageBuild(data, buffer);
         } catch (Throwable error) {
@@ -214,7 +215,7 @@ public final class LodChunkPageManager {
         }
     }
 
-    private record Snapshot(long revision, LodChunkMesh[] chunks, byte[][] geometry) {
+    private record Snapshot(long revision, LodChunkMesh[] chunks, PooledBytes[] geometry) {
         boolean matches(Snapshot other) {
             if (other == null || revision != other.revision) return false;
             for (int slot = 0; slot < SLOTS; slot++) {
@@ -267,7 +268,7 @@ public final class LodChunkPageManager {
             if (closed || building || ready != null) return;
 
             LodChunkMesh[] chunks = new LodChunkMesh[SLOTS];
-            byte[][] geometry = new byte[SLOTS][];
+            PooledBytes[] geometry = new PooledBytes[SLOTS];
             long revision = 0;
             boolean hasGeometry = false;
             for (LodChunkMesh mesh : meshes) {
@@ -354,8 +355,8 @@ public final class LodChunkPageManager {
             for (LodChunkMesh chunk : selected) {
                 int slot = slot(chunk);
                 if (uploaded.snapshot.chunks[slot] != chunk) continue;
-                byte[] geometry = chunk.geometry();
-                if (geometry != null && geometry.length == 0) continue;
+                PooledBytes geometry = chunk.geometry();
+                if (geometry != null && geometry.length() == 0) continue;
                 int indexCount = uploaded.indexCounts[slot];
                 if (indexCount == 0) continue;
                 counts.put(indexCount);

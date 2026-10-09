@@ -5,6 +5,7 @@ import it.unimi.dsi.fastutil.objects.Object2IntOpenHashMap;
 import it.unimi.dsi.fastutil.objects.ObjectOpenHashSet;
 import net.conczin.immersive_worldmap.lod.ChunkLodProcessor;
 import net.conczin.immersive_worldmap.lod.LodChunkData;
+import net.conczin.immersive_worldmap.util.PooledBytes;
 
 import java.util.*;
 import java.util.function.Predicate;
@@ -88,8 +89,8 @@ public final class LodChunkMeshManager {
     }
 
     private static long estimatedBytes(LodChunkMesh mesh) {
-        byte[] geometry = mesh.geometry();
-        return 128L + (geometry == null ? 0 : geometry.length);
+        PooledBytes geometry = mesh.geometry();
+        return 128L + (geometry == null ? 0 : geometry.capacity());
     }
 
     public synchronized long getByteBudget() {

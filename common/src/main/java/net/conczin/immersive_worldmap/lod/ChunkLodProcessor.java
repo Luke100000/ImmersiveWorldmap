@@ -4,6 +4,7 @@ import it.unimi.dsi.fastutil.HashCommon;
 import net.conczin.immersive_worldmap.database.ChunkLodDatabase;
 import net.conczin.immersive_worldmap.database.DatabaseManager;
 import net.conczin.immersive_worldmap.util.ChunkHash;
+import net.conczin.immersive_worldmap.util.PooledBytes;
 import net.conczin.immersive_worldmap.util.PriorityThreadPoolExecutor;
 import net.conczin.immersive_worldmap.util.ThreadPoolUtil;
 import net.conczin.immersive_worldmap.util.TickLruCache;
@@ -104,7 +105,7 @@ public class ChunkLodProcessor {
     }
 
     public static long getColorCacheBytes() {
-        return LOD_CACHE.values().stream().mapToLong(data -> data.data() == null ? 0 : data.data().length).sum();
+        return LOD_CACHE.values().stream().mapToLong(data -> data.data() == null ? 0 : data.data().capacity()).sum();
     }
 
     public static long getRecordingQueueBytes() {
@@ -316,7 +317,7 @@ public class ChunkLodProcessor {
                 byte[] result = generateLod(data);
                 int minSurface = findMinSurface(result);
                 upsertChunkData(key, result, minSurface, 0L, request, revision);
-                return new LodChunkData(key.chunkX(), key.chunkZ(), key.dimension(), key.lod(), result, minSurface);
+                return new LodChunkData(key.chunkX(), key.chunkZ(), key.dimension(), key.lod(), PooledBytes.wrap(result), minSurface);
             });
         });
     }

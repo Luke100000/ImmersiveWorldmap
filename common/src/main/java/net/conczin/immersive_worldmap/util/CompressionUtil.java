@@ -4,6 +4,7 @@ import net.jpountz.lz4.LZ4Compressor;
 import net.jpountz.lz4.LZ4Factory;
 import net.jpountz.lz4.LZ4FastDecompressor;
 
+import java.nio.ByteBuffer;
 import java.util.Arrays;
 
 public final class CompressionUtil {
@@ -52,7 +53,7 @@ public final class CompressionUtil {
         return Arrays.copyOf(out, 8 + n);
     }
 
-    public static byte[] decompress(byte[] blob) {
+    public static PooledBytes decompress(byte[] blob) {
         int origLen = readInt(blob, 0);
         int rleLen = readInt(blob, 4);
 
@@ -64,20 +65,23 @@ public final class CompressionUtil {
         byte[] rle = ensure(RLE_BUF, rleLen);
         D.decompress(blob, 8, rle, 0, rleLen);
 
-        byte[] out = new byte[origLen];
-        rleDecodeInto(rle, rleLen, out);
-        return out;
+        byte[] out = ensure(COMP_BUF, origLen);
+        rleDecodeInto(rle, rleLen, out, origLen);
+        PooledBytes result = PooledBytes.allocate(origLen);
+        result.copyFrom(ByteBuffer.wrap(out, 0, origLen));
+        return result;
     }
 
-    private static void rleDecodeInto(byte[] rle, int rleLen, byte[] out) {
+    private static void rleDecodeInto(byte[] rle, int rleLen, byte[] out, int length) {
         int p = 0;
         for (int i = 0; i < rleLen; i += 2) {
             int run = rle[i] & 0xFF;
             byte v = rle[i + 1];
+            if (run > length - p) throw new IllegalArgumentException("Chunk data run exceeds output length");
             Arrays.fill(out, p, p + run, v);
             p += run;
         }
-        if (p != out.length) {
+        if (p != length) {
             throw new IllegalArgumentException("Incomplete chunk data runs");
         }
     }

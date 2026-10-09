@@ -3,6 +3,7 @@ package net.conczin.immersive_worldmap.database;
 import net.conczin.immersive_worldmap.ImmersiveWorldmap;
 import net.conczin.immersive_worldmap.lod.LodChunkData;
 import net.conczin.immersive_worldmap.util.CompressionUtil;
+import net.conczin.immersive_worldmap.util.PooledBytes;
 
 import java.nio.file.Path;
 import java.sql.*;
@@ -12,7 +13,7 @@ import java.util.Set;
 import java.util.concurrent.ConcurrentHashMap;
 
 public class ChunkLodDatabase implements AutoCloseable {
-    public record StoredChunk(boolean exists, byte[] colors, boolean dirty, int minSurface) {
+    public record StoredChunk(boolean exists, PooledBytes colors, boolean dirty, int minSurface) {
     }
 
     @FunctionalInterface
@@ -239,7 +240,7 @@ public class ChunkLodDatabase implements AutoCloseable {
 
             byte[] compressed = rs.getBytes("colors");
             try {
-                byte[] colors = compressed == null ? null : CompressionUtil.decompress(compressed);
+                PooledBytes colors = compressed == null ? null : CompressionUtil.decompress(compressed);
                 return new StoredChunk(true, colors, false, minSurface);
             } catch (RuntimeException e) {
                 throw new SQLException("Invalid chunk data at " + x + ", " + z + " in " + dimension + " (LOD " + lod + ")", e);

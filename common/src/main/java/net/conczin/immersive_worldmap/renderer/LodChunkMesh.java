@@ -1,6 +1,7 @@
 package net.conczin.immersive_worldmap.renderer;
 
 import net.conczin.immersive_worldmap.lod.ChunkLodProcessor;
+import net.conczin.immersive_worldmap.util.PooledBytes;
 import net.conczin.immersive_worldmap.util.ThreadPoolUtil;
 
 import java.util.concurrent.atomic.AtomicLong;
@@ -14,7 +15,7 @@ public class LodChunkMesh {
     public final String dimension;
     private final ChunkLodProcessor.CacheKey key;
 
-    private volatile byte[] geometry;
+    private volatile PooledBytes geometry;
     private boolean requested;
     private long revision = REVISIONS.incrementAndGet();
     private long currentRevision;
@@ -31,11 +32,11 @@ public class LodChunkMesh {
         return key;
     }
 
-    byte[] geometry() {
+    PooledBytes geometry() {
         return geometry;
     }
 
-    synchronized long copyGeometry(byte[][] target, int slot) {
+    synchronized long copyGeometry(PooledBytes[] target, int slot) {
         target[slot] = geometry;
         return currentRevision;
     }

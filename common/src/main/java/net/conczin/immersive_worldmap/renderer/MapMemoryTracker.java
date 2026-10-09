@@ -4,6 +4,7 @@ import com.sun.management.GarbageCollectorMXBean;
 import com.sun.management.GcInfo;
 import net.conczin.immersive_worldmap.lod.ChunkLodProcessor;
 
+import java.lang.management.BufferPoolMXBean;
 import java.lang.management.ManagementFactory;
 import java.lang.management.MemoryPoolMXBean;
 import java.lang.management.MemoryType;
@@ -15,6 +16,8 @@ import java.util.stream.Collectors;
 public final class MapMemoryTracker {
     private static final long MIN_CACHE_BYTES = 128L * 1024 * 1024;
 
+    private static final List<BufferPoolMXBean> BUFFER_POOLS = ManagementFactory.getPlatformMXBeans(BufferPoolMXBean.class)
+            .stream().filter(pool -> pool.getName().equals("direct")).toList();
     private static final List<java.lang.management.GarbageCollectorMXBean> COLLECTORS = ManagementFactory.getGarbageCollectorMXBeans();
     private static final Set<String> HEAP_POOLS = ManagementFactory.getMemoryPoolMXBeans().stream()
             .filter(pool -> pool.getType() == MemoryType.HEAP).map(MemoryPoolMXBean::getName).collect(Collectors.toSet());
@@ -35,7 +38,8 @@ public final class MapMemoryTracker {
         recordingBytes = ChunkLodProcessor.getRecordingQueueBytes();
 
         Runtime runtime = Runtime.getRuntime();
-        long available = runtime.maxMemory() - heapUsedAfterGc(runtime);
+        long nativeBytes = BUFFER_POOLS.stream().mapToLong(BufferPoolMXBean::getMemoryUsed).sum();
+        long available = runtime.maxMemory() - heapUsedAfterGc(runtime) - nativeBytes;
         long estimated = colorBytes + pageBytes + recordingBytes;
 
         cpuBytes = LodChunkMeshManager.INSTANCE.trimToAvailableMemory(available - estimated, MIN_CACHE_BYTES);
