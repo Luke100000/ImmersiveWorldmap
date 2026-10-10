@@ -7,6 +7,7 @@ import net.conczin.immersive_worldmap.renderer.LodChunkMeshManager;
 import net.conczin.immersive_worldmap.renderer.LodChunkPageManager;
 import net.conczin.immersive_worldmap.renderer.LodChunkVisibilitySelector;
 import net.conczin.immersive_worldmap.renderer.MapMemoryTracker;
+import net.conczin.immersive_worldmap.util.PooledBytes;
 import net.conczin.immersive_worldmap.util.TickLruCache;
 import net.minecraft.client.KeyMapping;
 import net.minecraft.client.Minecraft;
@@ -63,14 +64,18 @@ public final class ImmersiveWorldmapClient {
     public static void onMapOpened() {
         mapOpen = true;
         closedAt = 0;
+        PooledBytes.setActive(true);
         LodChunkPageManager.INSTANCE.setActive(true);
     }
 
     public static void onMapClosed() {
+        PooledBytes.setActive(false);
         LodChunkVisibilitySelector.reset();
         ChunkLodProcessor.clearQueuedViewportTasks();
         LodChunkPageManager.INSTANCE.setActive(false);
+
         mapOpen = false;
+
         Minecraft minecraft = Minecraft.getInstance();
         Predicate<ChunkLodProcessor.CacheKey> keep = key -> false;
         if (minecraft.player != null && minecraft.level != null) {
@@ -112,6 +117,7 @@ public final class ImmersiveWorldmapClient {
         closedAt = 0;
         mapOpen = false;
 
+        PooledBytes.setActive(false);
         LodChunkPageManager.INSTANCE.setActive(false);
         LodChunkVisibilitySelector.reset();
         ChunkLodProcessor.clearQueuedViewportTasks();

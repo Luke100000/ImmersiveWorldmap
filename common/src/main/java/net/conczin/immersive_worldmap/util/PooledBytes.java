@@ -13,10 +13,12 @@ import java.util.Objects;
 
 public final class PooledBytes {
     private static final Unsafe UNSAFE = unsafe();
-    private static final long MAX_POOLED_BYTES = 64L * 1024 * 1024;
+    private static final long MAX_POOLED_BYTES = 256L * 1024 * 1024;
     private static final Map<Integer, ArrayDeque<ByteBuffer>> POOL = new HashMap<>();
     private static final PooledBytes EMPTY = new PooledBytes(ByteBuffer.allocate(0), 0);
     private static long pooledBytes;
+    private static boolean active;
+
     private static final Cleaner CLEANER = Cleaner.create(task -> {
         Thread thread = new Thread(task, "ImmersiveWorldmap-BufferRecycler");
         thread.setUncaughtExceptionHandler(ThreadPoolUtil::crash);
@@ -43,11 +45,29 @@ public final class PooledBytes {
         return new PooledBytes(ByteBuffer.wrap(bytes), bytes.length);
     }
 
+    public static void setActive(boolean active) {
+        synchronized (POOL) {
+            PooledBytes.active = active;
+            if (active) return;
+
+            // Only idle buffers are freed; workers and caches keep their live buffers.
+            for (ArrayDeque<ByteBuffer> buffers : POOL.values()) {
+                for (ByteBuffer buffer : buffers) {
+                    UNSAFE.invokeCleaner(buffer);
+                }
+            }
+
+            POOL.clear();
+            pooledBytes = 0;
+        }
+    }
+
     public static PooledBytes allocate(int length) {
         if (length < 0) {
             throw new IllegalArgumentException("Negative buffer length");
         }
         if (length == 0) return EMPTY;
+
         int capacity = Math.toIntExact((length + 4095L) & ~4095L);
         ByteBuffer bytes = null;
         synchronized (POOL) {
@@ -63,13 +83,13 @@ public final class PooledBytes {
         if (bytes == null) {
             bytes = ByteBuffer.allocateDirect(capacity);
         }
+
         PooledBytes result = new PooledBytes(bytes, length);
         ByteBuffer storage = bytes;
         CLEANER.register(result, () -> {
             try {
                 synchronized (POOL) {
-                    if (pooledBytes + storage.capacity() > MAX_POOLED_BYTES) {
-                        // A second GC for the direct buffer's cleaner can exhaust the native-memory limit.
+                    if (!active || pooledBytes + storage.capacity() > MAX_POOLED_BYTES) {
                         UNSAFE.invokeCleaner(storage);
                         return;
                     }
@@ -80,6 +100,7 @@ public final class PooledBytes {
                 ThreadPoolUtil.crash(Thread.currentThread(), error);
             }
         });
+
         return result;
     }
 
