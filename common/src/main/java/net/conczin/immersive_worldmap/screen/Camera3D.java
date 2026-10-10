@@ -245,6 +245,11 @@ public class Camera3D {
         velYaw = velPitch = 0f;
     }
 
+    public void snapRotation(float yaw, float pitch) {
+        setRotation(yaw, pitch);
+        smoothYaw = targetYaw;
+    }
+
     private void applyPan(float dx, float dy, int screenW, int screenH) {
         float yr = (float) Math.toRadians(smoothYaw);
         float cosY = (float) Math.cos(yr);

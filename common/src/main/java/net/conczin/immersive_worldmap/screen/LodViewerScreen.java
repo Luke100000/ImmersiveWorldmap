@@ -118,7 +118,7 @@ public class LodViewerScreen extends Screen {
                 - minecraft.level.getMinBuildHeight());
 
         camera.setZoom(SharedSettings.caveView ? 150f : 200f);
-        camera.setRotation(playerFacingYaw ? -minecraft.player.getYRot() : DEFAULT_YAW, SharedSettings.caveView ? -60 : -45f);
+        camera.snapRotation(playerFacingYaw ? -minecraft.player.getYRot() : DEFAULT_YAW, SharedSettings.caveView ? -60 : -45f);
     }
 
     private void clearMeshes() {
