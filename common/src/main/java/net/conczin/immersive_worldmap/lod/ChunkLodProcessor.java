@@ -3,13 +3,11 @@ package net.conczin.immersive_worldmap.lod;
 import it.unimi.dsi.fastutil.HashCommon;
 import net.conczin.immersive_worldmap.database.ChunkLodDatabase;
 import net.conczin.immersive_worldmap.database.DatabaseManager;
-import net.conczin.immersive_worldmap.util.ChunkHash;
-import net.conczin.immersive_worldmap.util.CompressionUtil;
-import net.conczin.immersive_worldmap.util.PooledBytes;
-import net.conczin.immersive_worldmap.util.PriorityThreadPoolExecutor;
-import net.conczin.immersive_worldmap.util.ThreadPoolUtil;
-import net.conczin.immersive_worldmap.util.TickLruCache;
+import net.conczin.immersive_worldmap.util.*;
+import net.minecraft.tags.BlockTags;
+import net.minecraft.world.level.ChunkPos;
 import net.minecraft.world.level.Level;
+import net.minecraft.world.level.block.BushBlock;
 import net.minecraft.world.level.block.state.BlockState;
 import net.minecraft.world.level.chunk.ChunkAccess;
 import net.minecraft.world.level.chunk.LevelChunk;
@@ -171,6 +169,16 @@ public class ChunkLodProcessor {
         return (x * height * 16) + (y * 16) + z;
     }
 
+    // Flowers are worth keeping, so their color is inlined into the surface below instead of a voxel.
+    private static boolean isFlower(BlockState state) {
+        return state.is(BlockTags.SMALL_FLOWERS) || state.is(BlockTags.TALL_FLOWERS);
+    }
+
+    // Ground foliage just adds uniform green noise, so it is dropped entirely.
+    private static boolean isGroundFoliage(BlockState state) {
+        return state.is(BlockTags.REPLACEABLE) && state.getBlock() instanceof BushBlock;
+    }
+
     private static void processChunkSync(CacheKey key, List<PalettedContainer<BlockState>> sections, ChunkSnapshot revision) {
         if (!DatabaseManager.isInitialized() || CHUNK_INGESTS.get(key) != revision) {
             return;
@@ -200,8 +208,23 @@ public class ChunkLodProcessor {
             for (int x = 0; x < 16; x++) {
                 for (int y = 0; y < 16; y++) {
                     for (int z = 0; z < 16; z++) {
-                        int color = section.get(x, y, z).getBlock().defaultMapColor().id;
+                        BlockState state = section.get(x, y, z);
                         int ay = (sectionIndex * 16) + y;
+                        int color = state.getBlock().defaultMapColor().id;
+
+                        if (isFlower(state)) {
+                            // The voxel below is already recorded, including across section boundaries.
+                            if (ay > 0) {
+                                int belowIndex = getBlockIndex(height, x, ay - 1, z);
+                                if (chunkData[belowIndex] != 0) {
+                                    chunkData[belowIndex] = (byte) color;
+                                }
+                            }
+                            color = 0;
+                        } else if (isGroundFoliage(state)) {
+                            color = 0;
+                        }
+
                         int blockIndex = getBlockIndex(height, x, ay, z);
                         chunkData[blockIndex] = (byte) color;
                     }
@@ -341,9 +364,6 @@ public class ChunkLodProcessor {
         int outHeight = Math.max(1, (sourceHeight + 1) / 2);
         byte[] result = new byte[16 * outHeight * 16];
 
-        int[] freq = new int[256];
-        int[] values = new int[8];
-
         // For all 4 parent chunks
         for (int cx = 0; cx < 2; cx++) {
             for (int cz = 0; cz < 2; cz++) {
@@ -355,34 +375,16 @@ public class ChunkLodProcessor {
                 // And over all output bytes
                 for (int x = 0; x < 8; x++) {
                     for (int z = 0; z < 8; z++) {
+                        // Sample coverage horizontally, but retain thin surface layers vertically.
+                        long position = ChunkPos.asLong(src.chunkX() * 8 + x, src.chunkZ() * 8 + z);
+                        int sample = (int) HashCommon.murmurHash3(position + src.lodLevel()) & 3;
+                        int sx = x * 2 + (sample >> 1);
+                        int sz = z * 2 + (sample & 1);
+
                         for (int y = 0; y < outHeight; y++) {
-                            byte modeVal = 0;
-                            int modeCount = 0;
-                            int count = 0;
-
-                            // Filter a 2x2x2 block
-                            for (int dx = 0; dx < 2; dx++) {
-                                for (int dy = 0; dy < 2; dy++) {
-                                    for (int dz = 0; dz < 2; dz++) {
-                                        byte i = src.getBlock(x * 2 + dx, y * 2 + dy, z * 2 + dz);
-                                        byte top = src.getBlock(x * 2 + dx, y * 2 + dy + 1, z * 2 + dz);
-                                        int is = i & 0xFF;
-                                        // Prefer exposed blocks
-                                        int c = (freq[is] += top == 0 ? 2 : 1);
-                                        if (c > modeCount) {
-                                            modeVal = i;
-                                            modeCount = c;
-                                        }
-                                        values[count++] = is;
-                                    }
-                                }
-                            }
-
-                            for (int i = 0; i < count; i++) {
-                                freq[values[i]] = 0;
-                            }
-
-                            result[getBlockIndex(outHeight, cx * 8 + x, y, cz * 8 + z)] = modeVal;
+                            byte upper = src.getBlock(sx, y * 2 + 1, sz);
+                            byte color = upper != 0 ? upper : src.getBlock(sx, y * 2, sz);
+                            result[getBlockIndex(outHeight, cx * 8 + x, y, cz * 8 + z)] = color;
                         }
                     }
                 }
