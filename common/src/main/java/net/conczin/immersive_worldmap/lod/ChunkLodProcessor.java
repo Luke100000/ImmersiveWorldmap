@@ -130,6 +130,10 @@ public class ChunkLodProcessor {
         List<PalettedContainer<BlockState>> sections = Arrays.stream(chunk.getSections())
                 .map(section -> section.hasOnlyAir() ? null : section.getStates().copy()).toList();
 
+        processChunk(key, sections, priority);
+    }
+
+    public static void processChunk(CacheKey key, List<PalettedContainer<BlockState>> sections, int priority) {
         long bytes = 128L + sections.size() * 8L + sections.stream().filter(Objects::nonNull).mapToLong(section -> section.getSerializedSize() + 128L).sum();
         CHUNK_INGESTS.put(key, new ChunkSnapshot(sections, bytes));
         queueRecording(key, priority);

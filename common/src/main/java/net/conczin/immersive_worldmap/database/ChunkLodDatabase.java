@@ -296,6 +296,12 @@ public class ChunkLodDatabase implements AutoCloseable {
         clear("DELETE FROM chunk_lod WHERE dimension = ? AND lod > 0", dimension);
     }
 
+    public void invalidateChunkHashes(String dimension) throws SQLException {
+        PreparedStatement statement = prepare(getConnection(), "UPDATE chunk_lod SET hash = 0 WHERE dimension = ? AND lod = 0");
+        statement.setString(1, dimension);
+        statement.executeUpdate();
+    }
+
     private void clear(String sql, String dimension) {
         try {
             Connection connection = getConnection();

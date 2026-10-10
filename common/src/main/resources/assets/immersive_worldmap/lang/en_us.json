@@ -13,6 +13,7 @@
   "screen.immersive_worldmap.tasks": "Pending tasks: %s",
   "screen.immersive_worldmap.clear_dimension": "F6: delete all map data for this dimension",
   "screen.immersive_worldmap.clear_generated": "F7: rebuild lower-detail map data",
+  "screen.immersive_worldmap.reprocess_generated": "F8: reprocess saved chunks (singleplayer)",
   "screen.immersive_worldmap.cache.colors": "Cache: colors %s",
   "screen.immersive_worldmap.cache.cpu": "CPU %s / %s",
   "screen.immersive_worldmap.cache.pages": "pages GPU %s / RAM %s",

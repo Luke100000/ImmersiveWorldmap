@@ -4,7 +4,7 @@ import com.mojang.blaze3d.systems.RenderSystem;
 import com.mojang.math.Axis;
 import net.conczin.immersive_worldmap.ImmersiveWorldmap;
 import net.conczin.immersive_worldmap.ImmersiveWorldmapClient;
-import net.conczin.immersive_worldmap.database.DatabaseManager;
+import net.conczin.immersive_worldmap.debug.MapDebug;
 import net.conczin.immersive_worldmap.lod.ChunkLodProcessor;
 import net.conczin.immersive_worldmap.renderer.LodChunkMeshManager;
 import net.conczin.immersive_worldmap.renderer.LodChunkPageManager;
@@ -126,18 +126,6 @@ public class LodViewerScreen extends Screen {
         LodChunkMeshManager.INSTANCE.clear();
     }
 
-    private void clearDimensionLods() {
-        DatabaseManager.getInstance().clearDimension(dimension);
-        ChunkLodProcessor.clearCache();
-        clearMeshes();
-    }
-
-    private void clearGeneratedLods() {
-        DatabaseManager.getInstance().clearGeneratedLods(dimension);
-        ChunkLodProcessor.clearCache();
-        clearMeshes();
-    }
-
     @Override
     public boolean mouseClicked(double mouseX, double mouseY, int button) {
         if (super.mouseClicked(mouseX, mouseY, button)) {
@@ -191,14 +179,20 @@ public class LodViewerScreen extends Screen {
             return true;
         }
 
-        // Debug-only destructive actions, gated behind the F3 overlay.
+        // Debug-only actions, gated behind the F3 overlay.
         if (minecraft.getDebugOverlay().showDebugScreen()) {
             if (keyCode == GLFW.GLFW_KEY_F6) {
-                clearDimensionLods();
+                MapDebug.clearDimensionLods(dimension);
                 return true;
             }
             if (keyCode == GLFW.GLFW_KEY_F7) {
-                clearGeneratedLods();
+                MapDebug.clearGeneratedLods(dimension);
+                return true;
+            }
+            if (keyCode == GLFW.GLFW_KEY_F8) {
+                if (heldKeys.add(keyCode)) {
+                    MapDebug.reprocessGeneratedChunks();
+                }
                 return true;
             }
         }
@@ -377,7 +371,8 @@ public class LodViewerScreen extends Screen {
 
         if (debug) {
             controlsText.append("\n").append(Component.translatable("screen.immersive_worldmap.clear_dimension"))
-                    .append("   ").append(Component.translatable("screen.immersive_worldmap.clear_generated"));
+                    .append("   ").append(Component.translatable("screen.immersive_worldmap.clear_generated"))
+                    .append("   ").append(Component.translatable("screen.immersive_worldmap.reprocess_generated"));
         }
 
         controlsLines = font.split(controlsText, Math.max(1, width - 80));

@@ -11,9 +11,7 @@ import net.minecraft.world.level.chunk.status.ChunkStatus;
 import net.minecraft.world.level.storage.LevelResource;
 
 import java.nio.file.Path;
-import java.util.HashMap;
-import java.util.Iterator;
-import java.util.Map;
+import java.util.*;
 
 public final class ServerChunkRecorder {
     private static final long UPDATE_INTERVAL_NANOS = 1_000_000_000L;
