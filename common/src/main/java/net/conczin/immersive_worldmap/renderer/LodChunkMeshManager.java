@@ -112,13 +112,16 @@ public final class LodChunkMeshManager {
     }
 
     public synchronized void prune(Predicate<ChunkLodProcessor.CacheKey> keep) {
+        viewport.clear();
         for (LodChunkMesh mesh : meshes()) {
-            if (keep.test(mesh.key())) continue;
+            if (keep.test(mesh.key())) {
+                viewport.add(mesh.key());
+                continue;
+            }
             mesh.close();
             cache.remove(mesh);
             liveMeshes.remove(mesh.key());
         }
-        viewport.clear();
     }
 
     public synchronized void invalidate(int cx, int cz, int lod, String dimension) {

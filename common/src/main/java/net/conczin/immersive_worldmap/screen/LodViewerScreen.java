@@ -117,7 +117,7 @@ public class LodViewerScreen extends Screen {
                 minecraft.level.getHeight(Heightmap.Types.WORLD_SURFACE, minecraft.player.getBlockX(), minecraft.player.getBlockZ())
                 - minecraft.level.getMinBuildHeight());
 
-        camera.setZoom(SharedSettings.caveView ? 150f : 225f);
+        camera.setZoom(SharedSettings.caveView ? 150f : 200f);
         camera.setRotation(playerFacingYaw ? -minecraft.player.getYRot() : DEFAULT_YAW, SharedSettings.caveView ? -60 : -45f);
     }
 

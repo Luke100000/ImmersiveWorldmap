@@ -52,6 +52,7 @@ public final class ImmersiveWorldmapClient {
             if (now - closedAt >= TimeUnit.MINUTES.toNanos(5)
                 || !minecraft.level.dimension().location().toString().equals(closedDimension)
                 || dx * dx + dz * dz > RETENTION_RADIUS * RETENTION_RADIUS) {
+                LodChunkPageManager.INSTANCE.clear();
                 LodChunkMeshManager.INSTANCE.prune(key -> false);
                 ChunkLodProcessor.clearCache();
                 closedAt = 0;
@@ -83,7 +84,7 @@ public final class ImmersiveWorldmapClient {
             closedZ = minecraft.player.getZ();
             closedDimension = minecraft.level.dimension().location().toString();
             closedAt = System.nanoTime();
-            keep = key -> key.lod() == 0 && key.dimension().equals(closedDimension);
+            keep = key -> key.dimension().equals(closedDimension);
         }
         LodChunkMeshManager.INSTANCE.prune(keep);
         ChunkLodProcessor.pruneCache(keep);

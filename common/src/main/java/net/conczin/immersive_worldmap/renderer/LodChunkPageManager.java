@@ -50,6 +50,7 @@ public final class LodChunkPageManager {
     private volatile long assemblingBytes;
 
     private long lastPruneNanos;
+    private long pruneGraceEndNanos;
 
     private LodChunkPageManager() {
     }
@@ -94,6 +95,8 @@ public final class LodChunkPageManager {
 
     public void draw(Plan plan, Matrix4f mv, Matrix4f proj, float focusX, float focusZ,
                      LodChunkVisibilitySelector.RenderRange range) {
+        if (plan == Plan.EMPTY) return;
+
         long now = System.nanoTime();
         for (Page page : plan.neededPages) {
             page.lastUsedNanos = now;
@@ -134,13 +137,21 @@ public final class LodChunkPageManager {
         gpuBytes = 0;
         uploadCursor = 0;
         lastPruneNanos = 0;
+        pruneGraceEndNanos = 0;
     }
 
     public synchronized void setActive(boolean active) {
         this.active = active;
-        if (!active) {
-            clear();
+        if (!active) return;
+
+        // Retained pages were last used before the close; refresh them and hold off
+        // pruning until the opening animation settles and the selector has run again.
+        long now = System.nanoTime();
+        for (Page page : pages.values()) {
+            page.lastUsedNanos = now;
         }
+        lastPruneNanos = now;
+        pruneGraceEndNanos = now + 1_500_000_000L;
     }
 
     public long getGpuBytes() {
@@ -206,7 +217,7 @@ public final class LodChunkPageManager {
     }
 
     private synchronized void pruneUnusedPages(long now) {
-        if (now - lastPruneNanos < PRUNE_INTERVAL_NANOS) return;
+        if (now < pruneGraceEndNanos || now - lastPruneNanos < PRUNE_INTERVAL_NANOS) return;
         lastPruneNanos = now;
         for (Page page : pages.values()) {
             if (now - page.lastUsedNanos >= PRUNE_INTERVAL_NANOS && pages.remove(page.key, page)) {
@@ -277,18 +288,27 @@ public final class LodChunkPageManager {
         synchronized void update(List<LodChunkMesh> meshes) {
             if (closed || building || ready != null) return;
 
-            LodChunkMesh[] chunks = new LodChunkMesh[SLOTS];
+            // Keep uploaded slots resident when the camera temporarily excludes them.
+            LodChunkMesh[] chunks = uploaded == null ? new LodChunkMesh[SLOTS] : uploaded.snapshot.chunks.clone();
+            for (LodChunkMesh mesh : meshes) {
+                chunks[slot(mesh)] = mesh;
+            }
+
             PooledBytes[] geometry = new PooledBytes[SLOTS];
             long revision = 0;
             boolean hasGeometry = false;
-            for (LodChunkMesh mesh : meshes) {
-                int slot = slot(mesh);
+            for (int slot = 0; slot < SLOTS; slot++) {
+                LodChunkMesh mesh = chunks[slot];
+                if (mesh == null) continue;
+
                 long meshRevision = mesh.copyGeometry(geometry, slot);
                 if (geometry[slot] == null && uploaded != null && uploaded.snapshot.chunks[slot] == mesh) {
                     geometry[slot] = uploaded.snapshot.geometry[slot];
                 }
-                if (geometry[slot] == null) continue;
-                chunks[slot] = mesh;
+                if (geometry[slot] == null) {
+                    chunks[slot] = null;
+                    continue;
+                }
                 hasGeometry = true;
                 revision += HashCommon.mix(meshRevision ^ HashCommon.mix((long) slot));
             }
