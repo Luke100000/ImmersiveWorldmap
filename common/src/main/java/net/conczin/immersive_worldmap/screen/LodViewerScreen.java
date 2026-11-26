@@ -287,8 +287,9 @@ public class LodViewerScreen extends Screen {
             float eyeZ = targetZ - (float) (Math.cos(yaw) * Math.cos(pitch)) * zoom;
 
             mv = new Matrix4f().lookAt(eyeX, eyeY, eyeZ, targetX, targetY, targetZ, 0, 1, 0);
+            // Reversed-Z like vanilla since 26.2: far and near are swapped to match the GREATER_THAN_OR_EQUAL depth test.
             proj = new Matrix4f().setPerspective((float) Math.toRadians(60.0), (float) width / height,
-                    zoom * 0.1f, Math.max(zoom * 10f, renderRange.end() * 2f), RenderSystem.getDevice().getDeviceInfo().isZZeroToOne());
+                    Math.max(zoom * 10f, renderRange.end() * 2f), zoom * 0.1f, RenderSystem.getDevice().getDeviceInfo().isZZeroToOne());
 
             LodChunkVisibilitySelector.get().update(dimension, minecraft.level.getHeight(), targetX, targetY, targetZ,
                     yawDegrees, pitchDegrees, zoom, (float) width / height, renderRange.end());
