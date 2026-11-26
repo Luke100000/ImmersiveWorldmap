@@ -25,6 +25,7 @@ import org.joml.Matrix4f;
 import org.lwjgl.system.MemoryUtil;
 
 import java.nio.ByteBuffer;
+import java.nio.ByteOrder;
 import java.util.*;
 import java.util.OptionalDouble;
 import java.util.OptionalInt;
@@ -150,7 +151,7 @@ public final class LodChunkPageManager {
                 float originX = page.key.x * PAGE_SIZE * 16f * scale;
                 float originZ = page.key.z * PAGE_SIZE * 16f * scale;
                 localMv.set(mv).translate(originX, 0, originZ).scale(scale, scale, scale);
-                Std140Builder.intoBuffer(uniforms.slice(i * stride, UNIFORM_SIZE))
+                Std140Builder.intoBuffer(uniforms.slice(i * stride, UNIFORM_SIZE).order(ByteOrder.nativeOrder()))
                         .putMat4f(localMv)
                         .putMat4f(proj)
                         .putVec4(uvX, uvY, uvOffsetX, uvOffsetY)
