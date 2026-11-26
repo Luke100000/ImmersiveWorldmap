@@ -1,3 +1,8 @@
+# 0.2.0
+
+* Added config
+* Added Japanese translation
+
 # 0.1.0
 
 * First release.
