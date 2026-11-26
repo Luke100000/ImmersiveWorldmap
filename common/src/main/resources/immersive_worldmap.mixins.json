@@ -4,7 +4,7 @@
   "package": "net.conczin.immersive_worldmap.mixin",
   "compatibilityLevel": "JAVA_21",
   "mixins": ["ChunkSerializerMixin", "LevelChunkMixin", "MinecraftServerMixin"],
-  "client": ["ClientChunkCacheMixin", "ClientLevelMixin", "GameRendererMixin", "GuiGraphicsExtractorAccessor"],
+  "client": ["ClientChunkCacheMixin", "ClientLevelMixin", "GameRendererMixin", "GuiGraphicsExtractorAccessor", "PictureInPictureRendererAccessor", "RenderPipelinesInvoker"],
   "server": [
   ],
   "injectors": {

@@ -1,17 +1,17 @@
 package net.conczin.immersive_worldmap.renderer;
 
-import com.mojang.blaze3d.PrimitiveTopology;
-import com.mojang.blaze3d.buffers.GpuBuffer;
+import com.mojang.renderpearl.api.pipeline.PrimitiveTopology;
+import com.mojang.renderpearl.api.buffers.GpuBuffer;
 import com.mojang.blaze3d.buffers.Std140Builder;
-import com.mojang.blaze3d.pipeline.BindGroupLayout;
-import com.mojang.blaze3d.pipeline.DepthStencilState;
-import com.mojang.blaze3d.pipeline.RenderPipeline;
-import com.mojang.blaze3d.shaders.UniformType;
-import com.mojang.blaze3d.systems.GpuDevice;
-import com.mojang.blaze3d.systems.RenderPass;
+import com.mojang.renderpearl.api.pipeline.BindGroupLayout;
+import com.mojang.renderpearl.api.pipeline.DepthStencilState;
+import com.mojang.renderpearl.api.pipeline.RenderPipeline;
+import com.mojang.renderpearl.api.pipeline.UniformType;
+import com.mojang.renderpearl.api.device.GpuDevice;
+import com.mojang.renderpearl.api.commands.RenderPass;
 import com.mojang.blaze3d.systems.RenderSystem;
-import com.mojang.blaze3d.textures.FilterMode;
-import com.mojang.blaze3d.textures.GpuTextureView;
+import com.mojang.renderpearl.api.textures.FilterMode;
+import com.mojang.renderpearl.api.textures.GpuTextureView;
 import com.mojang.blaze3d.vertex.DefaultVertexFormat;
 import it.unimi.dsi.fastutil.HashCommon;
 import it.unimi.dsi.fastutil.objects.ObjectLinkedOpenHashSet;
@@ -35,7 +35,7 @@ public final class LodChunkPageManager {
     public static final int PAGE_SIZE = 8;
     private static final BindGroupLayout LAYOUT = BindGroupLayout.builder()
             .withUniform("MapInfo", UniformType.UNIFORM_BUFFER)
-            .withSampler("BackgroundTexture")
+            .withUniform("BackgroundTexture", UniformType.COMBINED_IMAGE_SAMPLER)
             .build();
     public static final RenderPipeline PIPELINE = RenderPipeline.builder()
             .withLocation(ImmersiveWorldmap.locate("pipeline/map"))
@@ -175,8 +175,8 @@ public final class LodChunkPageManager {
 
             try (RenderPass pass = device.createCommandEncoder().createRenderPass(
                     () -> "Immersive Worldmap", color, Optional.empty(), depth, OptionalDouble.empty())) {
-                pass.setPipeline(PIPELINE);
-                pass.bindTexture("BackgroundTexture", background.getTextureView(),
+                pass.setPipeline(RenderSystem.getCompiledPipeline(PIPELINE));
+                pass.setUniform("BackgroundTexture", background.getTextureView(),
                         RenderSystem.getSamplerCache().getClampToEdge(FilterMode.NEAREST));
                 pass.setIndexBuffer(indexBuffer, indices.type());
                 for (int i = 0; i < batches.size(); i++) {

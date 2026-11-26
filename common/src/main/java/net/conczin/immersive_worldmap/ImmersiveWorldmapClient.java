@@ -12,7 +12,8 @@ import net.conczin.immersive_worldmap.util.TickLruCache;
 import net.minecraft.client.KeyMapping;
 import net.minecraft.client.Minecraft;
 import net.minecraft.client.multiplayer.ServerData;
-import org.lwjgl.glfw.GLFW;
+import com.mojang.blaze3d.platform.InputConstants;
+import net.conczin.immersive_worldmap.mixin.RenderPipelinesInvoker;
 
 import java.nio.file.Path;
 import java.util.concurrent.TimeUnit;
@@ -21,7 +22,7 @@ import java.util.function.Predicate;
 public final class ImmersiveWorldmapClient {
     private static final KeyMapping.Category CATEGORY = KeyMapping.Category.register(ImmersiveWorldmap.locate("main"));
     public static final KeyMapping MAP_VIEWER_KEY = new KeyMapping(
-            "key.immersive_worldmap.open_lod_viewer", GLFW.GLFW_KEY_M, CATEGORY);
+            "key.immersive_worldmap.open_lod_viewer", InputConstants.KEY_M, CATEGORY);
 
     private static final double RETENTION_RADIUS = 675;
 
@@ -36,6 +37,7 @@ public final class ImmersiveWorldmapClient {
     }
 
     public static void init() {
+        RenderPipelinesInvoker.immersive_worldmap$register(LodChunkPageManager.PIPELINE);
         ChunkLodProcessor.setInvalidationListener(key -> LodChunkMeshManager.INSTANCE.invalidate(
                 key.chunkX(), key.chunkZ(), key.lod(), key.dimension()));
     }

@@ -1,6 +1,6 @@
 package net.conczin.immersive_worldmap.renderer;
 
-import com.mojang.blaze3d.PrimitiveTopology;
+import com.mojang.renderpearl.api.pipeline.PrimitiveTopology;
 import com.mojang.blaze3d.vertex.*;
 import net.conczin.immersive_worldmap.lod.ChunkLodProcessor;
 import net.conczin.immersive_worldmap.lod.LodChunkData;

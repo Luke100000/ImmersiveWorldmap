@@ -33,7 +33,7 @@ import net.minecraft.world.level.levelgen.Heightmap;
 import net.minecraft.world.phys.Vec3;
 import org.joml.Matrix4f;
 import org.joml.Vector4f;
-import org.lwjgl.glfw.GLFW;
+import com.mojang.blaze3d.platform.InputConstants;
 
 import java.util.HashSet;
 import java.util.List;
@@ -110,7 +110,7 @@ public class LodViewerScreen extends Screen {
         SharedSettings.caveView = false;
         for (; aboveHead.getY() < minecraft.level.getMaxY(); aboveHead.move(0, 1, 0)) {
             BlockState state = minecraft.level.getBlockState(aboveHead);
-            if (state.blocksMotion() && !(state.getBlock() instanceof LeavesBlock)) {
+            if (!state.getCollisionShape(minecraft.level, aboveHead).isEmpty() && !(state.getBlock() instanceof LeavesBlock)) {
                 SharedSettings.caveView = true;
                 break;
             }
@@ -169,14 +169,14 @@ public class LodViewerScreen extends Screen {
             return true;
         }
 
-        if (keyCode == GLFW.GLFW_KEY_F1) {
+        if (keyCode == InputConstants.KEY_F1) {
             if (heldKeys.add(keyCode)) {
                 minecraft.gui.hud.toggle();
             }
             return true;
         }
 
-        if (keyCode == GLFW.GLFW_KEY_F3) {
+        if (keyCode == InputConstants.KEY_F3) {
             if (heldKeys.add(keyCode)) {
                 minecraft.debugEntries.toggleDebugOverlay();
             }
@@ -185,15 +185,15 @@ public class LodViewerScreen extends Screen {
 
         // Debug-only actions, gated behind the F3 overlay.
         if (minecraft.debugEntries.isOverlayVisible()) {
-            if (keyCode == GLFW.GLFW_KEY_F6) {
+            if (keyCode == InputConstants.KEY_F6) {
                 MapDebug.clearDimensionLods(dimension);
                 return true;
             }
-            if (keyCode == GLFW.GLFW_KEY_F7) {
+            if (keyCode == InputConstants.KEY_F7) {
                 MapDebug.clearGeneratedLods(dimension);
                 return true;
             }
-            if (keyCode == GLFW.GLFW_KEY_F8) {
+            if (keyCode == InputConstants.KEY_F8) {
                 if (heldKeys.add(keyCode)) {
                     MapDebug.reprocessGeneratedChunks();
                 }
@@ -201,7 +201,7 @@ public class LodViewerScreen extends Screen {
             }
         }
 
-        if (keyCode == GLFW.GLFW_KEY_C) {
+        if (keyCode == InputConstants.KEY_C) {
             if (heldKeys.add(keyCode)) {
                 SharedSettings.caveView = !SharedSettings.caveView;
                 clearMeshes();
@@ -209,7 +209,7 @@ public class LodViewerScreen extends Screen {
             return true;
         }
 
-        if (keyCode == GLFW.GLFW_KEY_SPACE) {
+        if (keyCode == InputConstants.KEY_SPACE) {
             if (heldKeys.add(keyCode)) {
                 playerFacingYaw = !playerFacingYaw;
                 if (minecraft.player != null) {

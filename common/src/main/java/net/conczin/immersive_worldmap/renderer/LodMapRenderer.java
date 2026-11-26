@@ -1,7 +1,7 @@
 package net.conczin.immersive_worldmap.renderer;
 
-import com.mojang.blaze3d.systems.RenderSystem;
 import com.mojang.blaze3d.vertex.PoseStack;
+import net.conczin.immersive_worldmap.mixin.PictureInPictureRendererAccessor;
 import net.minecraft.client.gui.render.pip.PictureInPictureRenderer;
 import net.minecraft.client.renderer.SubmitNodeCollector;
 
@@ -16,9 +16,10 @@ public class LodMapRenderer extends PictureInPictureRenderer<LodMapRenderState> 
 
     @Override
     protected void renderToTexture(LodMapRenderState state, PoseStack poseStack, SubmitNodeCollector submitNodeCollector) {
+        PictureInPictureRendererAccessor accessor = (PictureInPictureRendererAccessor) this;
         LodChunkPageManager.INSTANCE.draw(state.plan(), state.modelView(), state.projection(),
                 state.focusX(), state.focusZ(), state.range(), state.x1() - state.x0(), state.y1() - state.y0(),
-                RenderSystem.outputColorTextureOverride, RenderSystem.outputDepthTextureOverride);
+                accessor.immersive_worldmap$getTextureView(), accessor.immersive_worldmap$getDepthTextureView());
     }
 
     @Override
