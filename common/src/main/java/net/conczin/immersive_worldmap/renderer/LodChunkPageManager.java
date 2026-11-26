@@ -1,7 +1,9 @@
 package net.conczin.immersive_worldmap.renderer;
 
+import com.mojang.blaze3d.PrimitiveTopology;
 import com.mojang.blaze3d.buffers.GpuBuffer;
 import com.mojang.blaze3d.buffers.Std140Builder;
+import com.mojang.blaze3d.pipeline.BindGroupLayout;
 import com.mojang.blaze3d.pipeline.DepthStencilState;
 import com.mojang.blaze3d.pipeline.RenderPipeline;
 import com.mojang.blaze3d.shaders.UniformType;
@@ -11,7 +13,6 @@ import com.mojang.blaze3d.systems.RenderSystem;
 import com.mojang.blaze3d.textures.FilterMode;
 import com.mojang.blaze3d.textures.GpuTextureView;
 import com.mojang.blaze3d.vertex.DefaultVertexFormat;
-import com.mojang.blaze3d.vertex.VertexFormat;
 import it.unimi.dsi.fastutil.HashCommon;
 import it.unimi.dsi.fastutil.objects.ObjectLinkedOpenHashSet;
 import net.conczin.immersive_worldmap.ImmersiveWorldmap;
@@ -26,19 +27,23 @@ import org.lwjgl.system.MemoryUtil;
 
 import java.nio.ByteBuffer;
 import java.util.*;
+import java.util.Optional;
 import java.util.OptionalDouble;
-import java.util.OptionalInt;
 import java.util.concurrent.ConcurrentHashMap;
 
 public final class LodChunkPageManager {
     public static final int PAGE_SIZE = 8;
+    private static final BindGroupLayout LAYOUT = BindGroupLayout.builder()
+            .withUniform("MapInfo", UniformType.UNIFORM_BUFFER)
+            .withSampler("BackgroundTexture")
+            .build();
     public static final RenderPipeline PIPELINE = RenderPipeline.builder()
             .withLocation(ImmersiveWorldmap.locate("pipeline/map"))
             .withVertexShader(ImmersiveWorldmap.locate("core/immersive_worldmap_map"))
             .withFragmentShader(ImmersiveWorldmap.locate("core/immersive_worldmap_map"))
-            .withUniform("MapInfo", UniformType.UNIFORM_BUFFER)
-            .withSampler("BackgroundTexture")
-            .withVertexFormat(DefaultVertexFormat.POSITION_COLOR, VertexFormat.Mode.QUADS)
+            .withBindGroupLayout(LAYOUT)
+            .withVertexBinding(0, DefaultVertexFormat.POSITION_COLOR)
+            .withPrimitiveTopology(PrimitiveTopology.QUADS)
             .withDepthStencilState(DepthStencilState.DEFAULT)
             .build();
 
@@ -132,7 +137,7 @@ public final class LodChunkPageManager {
                              float focusX, float focusZ, LodChunkVisibilitySelector.RenderRange range,
                              int guiWidth, int guiHeight, GpuTextureView color, GpuTextureView depth) {
         GpuDevice device = RenderSystem.getDevice();
-        int alignment = device.getUniformOffsetAlignment();
+        int alignment = device.getDeviceInfo().limits().minUniformOffsetAlignment();
         int stride = (UNIFORM_SIZE + alignment - 1) / alignment * alignment;
 
         int side = (int) Math.ceil(Math.hypot(guiWidth, guiHeight));
@@ -165,11 +170,11 @@ public final class LodChunkPageManager {
         try (uniformBuffer) {
             DynamicTexture background = MapBackgroundTexture.texture();
             int maxIndexCount = batches.stream().mapToInt(entry -> entry.getKey().uploaded.drawIndexCount).max().orElse(0);
-            RenderSystem.AutoStorageIndexBuffer indices = RenderSystem.getSequentialBuffer(VertexFormat.Mode.QUADS);
+            RenderSystem.AutoStorageIndexBuffer indices = RenderSystem.getSequentialBuffer(PrimitiveTopology.QUADS);
             GpuBuffer indexBuffer = indices.getBuffer(maxIndexCount);
 
             try (RenderPass pass = device.createCommandEncoder().createRenderPass(
-                    () -> "Immersive Worldmap", color, OptionalInt.empty(), depth, OptionalDouble.empty())) {
+                    () -> "Immersive Worldmap", color, Optional.empty(), depth, OptionalDouble.empty())) {
                 pass.setPipeline(PIPELINE);
                 pass.bindTexture("BackgroundTexture", background.getTextureView(),
                         RenderSystem.getSamplerCache().getClampToEdge(FilterMode.NEAREST));
@@ -431,7 +436,7 @@ public final class LodChunkPageManager {
         }
 
         void draw(RenderPass pass, List<LodChunkMesh> selected) {
-            pass.setVertexBuffer(0, vertexBuffer);
+            pass.setVertexBuffer(0, vertexBuffer.slice());
             for (LodChunkMesh chunk : selected) {
                 int slot = slot(chunk);
                 if (uploaded.snapshot.chunks[slot] != chunk) continue;
@@ -440,7 +445,7 @@ public final class LodChunkPageManager {
                 int indexCount = uploaded.indexCounts[slot];
                 if (indexCount == 0) continue;
                 // Quad indices start at zero for every mesh and only the base vertex varies.
-                pass.drawIndexed(uploaded.baseVertices[slot], 0, indexCount, 1);
+                pass.drawIndexed(indexCount, 1, 0, uploaded.baseVertices[slot], 0);
             }
         }
 

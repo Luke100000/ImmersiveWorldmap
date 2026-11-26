@@ -171,7 +171,7 @@ public class LodViewerScreen extends Screen {
 
         if (keyCode == GLFW.GLFW_KEY_F1) {
             if (heldKeys.add(keyCode)) {
-                minecraft.options.hideGui = !minecraft.options.hideGui;
+                minecraft.gui.hud.toggle();
             }
             return true;
         }
@@ -285,7 +285,7 @@ public class LodViewerScreen extends Screen {
 
             mv = new Matrix4f().lookAt(eyeX, eyeY, eyeZ, targetX, targetY, targetZ, 0, 1, 0);
             proj = new Matrix4f().setPerspective((float) Math.toRadians(60.0), (float) width / height,
-                    zoom * 0.1f, Math.max(zoom * 10f, renderRange.end() * 2f), RenderSystem.getDevice().isZZeroToOne());
+                    zoom * 0.1f, Math.max(zoom * 10f, renderRange.end() * 2f), RenderSystem.getDevice().getDeviceInfo().isZZeroToOne());
 
             LodChunkVisibilitySelector.get().update(dimension, minecraft.level.getHeight(), targetX, targetY, targetZ,
                     yawDegrees, pitchDegrees, zoom, (float) width / height, renderRange.end());
@@ -299,7 +299,7 @@ public class LodViewerScreen extends Screen {
 
         renderPlayers(graphics, mv, proj);
 
-        if (!minecraft.options.hideGui) {
+        if (!minecraft.gui.hud.isHidden()) {
             drawDebug(graphics, yawDegrees);
         }
 

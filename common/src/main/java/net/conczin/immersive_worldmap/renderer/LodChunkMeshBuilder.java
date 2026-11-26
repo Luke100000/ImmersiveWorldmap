@@ -1,12 +1,13 @@
 package net.conczin.immersive_worldmap.renderer;
 
+import com.mojang.blaze3d.PrimitiveTopology;
 import com.mojang.blaze3d.vertex.*;
 import net.conczin.immersive_worldmap.lod.ChunkLodProcessor;
 import net.conczin.immersive_worldmap.lod.LodChunkData;
 import net.conczin.immersive_worldmap.settings.SharedSettings;
 import net.conczin.immersive_worldmap.util.ColorManager;
 import net.conczin.immersive_worldmap.util.PooledBytes;
-import net.conczin.immersive_worldmap.util.TesselatorPool;
+import net.conczin.immersive_worldmap.util.ByteBufferBuilderPool;
 import net.conczin.immersive_worldmap.util.ThreadPoolUtil;
 
 import java.util.ArrayList;
@@ -70,9 +71,9 @@ public class LodChunkMeshBuilder {
 
         int floor = slice == null ? Math.max(0, getMinSurrounding(neighbors) - FLOOR_BUFFER) : 0;
 
-        Tesselator tesselator = TesselatorPool.acquire();
+        ByteBufferBuilder buffer = ByteBufferBuilderPool.acquire();
         try {
-            BufferBuilder builder = tesselator.begin(VertexFormat.Mode.QUADS, DefaultVertexFormat.POSITION_COLOR);
+            BufferBuilder builder = new BufferBuilder(buffer, PrimitiveTopology.QUADS, DefaultVertexFormat.POSITION_COLOR);
             VertexWriter writer = new VertexWriter(builder,
                     Math.floorMod(center.chunkX(), LodChunkPageManager.PAGE_SIZE) * 16,
                     Math.floorMod(center.chunkZ(), LodChunkPageManager.PAGE_SIZE) * 16);
@@ -282,7 +283,7 @@ public class LodChunkMeshBuilder {
                 return vertices;
             }
         } finally {
-            TesselatorPool.release(tesselator);
+            ByteBufferBuilderPool.release(buffer);
         }
     }
 

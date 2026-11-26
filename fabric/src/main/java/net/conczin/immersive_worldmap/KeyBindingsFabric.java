@@ -10,8 +10,8 @@ public class KeyBindingsFabric {
 
         ClientTickEvents.END_CLIENT_TICK.register(client -> {
             while (ImmersiveWorldmapClient.MAP_VIEWER_KEY.consumeClick()) {
-                if (client.screen == null && client.player != null && client.level != null) {
-                    client.setScreen(new LodViewerScreen());
+                if (client.gui.screen() == null && client.player != null && client.level != null) {
+                    client.gui.setScreen(new LodViewerScreen());
                 }
             }
         });

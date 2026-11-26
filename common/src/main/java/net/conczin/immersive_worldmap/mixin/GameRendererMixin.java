@@ -11,11 +11,11 @@ import org.spongepowered.asm.mixin.injection.ModifyVariable;
 public class GameRendererMixin {
     @ModifyVariable(method = "extract", at = @At("HEAD"), argsOnly = true, ordinal = 0)
     private boolean immersive_worldmap$extractLevel(boolean advanceGameTime) {
-        return advanceGameTime && !(Minecraft.getInstance().screen instanceof LodViewerScreen);
+        return advanceGameTime && !(Minecraft.getInstance().gui.screen() instanceof LodViewerScreen);
     }
 
     @ModifyVariable(method = "render", at = @At("HEAD"), argsOnly = true, ordinal = 0)
     private boolean immersive_worldmap$renderLevel(boolean advanceGameTime) {
-        return advanceGameTime && !(Minecraft.getInstance().screen instanceof LodViewerScreen);
+        return advanceGameTime && !(Minecraft.getInstance().gui.screen() instanceof LodViewerScreen);
     }
 }
