@@ -41,7 +41,7 @@ loom {
             setConfigName('Fabric Client')
             ideConfigGenerated(true)
             runDir('runs/client')
-            vmArg('-Xmx4G')
+            vmArg('-Xmx3G')
         }
         server {
             server()

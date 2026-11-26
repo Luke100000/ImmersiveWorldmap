@@ -28,6 +28,7 @@ neoForge {
         }
         client {
             client()
+            jvmArguments = ['-Xmx3G']
         }
         data {
             data()
