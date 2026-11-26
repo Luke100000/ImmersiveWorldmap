@@ -1,0 +1,21 @@
+{
+  "key.immersive_worldmap.open_lod_viewer": "世界地図を開く",
+  "category.immersive_worldmap": "Immersive Worldmap",
+  "screen.immersive_worldmap.title": "世界地図",
+  "screen.immersive_worldmap.controls.pan_drag": "右ドラッグ: 角度",
+  "screen.immersive_worldmap.controls.orbit_drag": "左ドラッグ: 位置",
+  "screen.immersive_worldmap.controls.zoom": "スクロール: ズーム",
+  "screen.immersive_worldmap.controls.pan_keys": "WASD/矢印: 角度",
+  "screen.immersive_worldmap.controls.rotate": "Q/E: 回転",
+  "screen.immersive_worldmap.controls.align_view": "スペース: 地図の向きを切り替え",
+  "screen.immersive_worldmap.controls.cave_view": "C: 洞窟表示を切り替え",
+  "screen.immersive_worldmap.controls.close": "%s/Esc: 閉じる",
+  "screen.immersive_worldmap.tasks": "待機中のタスク: %s",
+  "screen.immersive_worldmap.clear_dimension": "F6: このディメンションのすべての地図データを削除",
+  "screen.immersive_worldmap.clear_generated": "F7: 低詳細地図データを再構築",
+  "screen.immersive_worldmap.reprocess_generated": "F8: 保存されたチャンクを再処理 (シングルプレイヤー)",
+  "screen.immersive_worldmap.cache.colors": "Cache: 色彩 %s",
+  "screen.immersive_worldmap.cache.cpu": "CPU %s / %s",
+  "screen.immersive_worldmap.cache.pages": "ページGPU %s / RAM %s",
+  "screen.immersive_worldmap.cache.recording": "記録 %s"
+}
