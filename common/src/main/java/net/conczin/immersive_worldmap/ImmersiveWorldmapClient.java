@@ -1,5 +1,6 @@
 package net.conczin.immersive_worldmap;
 
+import net.conczin.immersive_worldmap.config.Config;
 import net.conczin.immersive_worldmap.database.DatabaseManager;
 import net.conczin.immersive_worldmap.lod.ChunkLodProcessor;
 import net.conczin.immersive_worldmap.lod.ServerChunkRecorder;
@@ -52,7 +53,7 @@ public final class ImmersiveWorldmapClient {
         if (!mapOpen && closedAt != 0 && minecraft.player != null && minecraft.level != null) {
             double dx = minecraft.player.getX() - closedX;
             double dz = minecraft.player.getZ() - closedZ;
-            if (now - closedAt >= TimeUnit.MINUTES.toNanos(5)
+            if (now - closedAt >= TimeUnit.MINUTES.toNanos(Config.getInstance().retentionMinutes)
                 || !minecraft.level.dimension().identifier().toString().equals(closedDimension)
                 || dx * dx + dz * dz > RETENTION_RADIUS * RETENTION_RADIUS) {
                 LodChunkPageManager.INSTANCE.clear();
