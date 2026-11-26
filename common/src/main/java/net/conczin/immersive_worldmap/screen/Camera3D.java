@@ -1,5 +1,6 @@
 package net.conczin.immersive_worldmap.screen;
 
+import com.mojang.blaze3d.platform.InputConstants;
 import net.minecraft.util.Mth;
 
 public class Camera3D {
@@ -33,19 +34,19 @@ public class Camera3D {
     private static final float WASD_SPEED = 0.01f; // fraction of zoom
     private static final float KEY_ROTATION_SPEED = 150f; // degrees per second
 
-    private static final int MOUSE_PAN = 0;
-    private static final int MOUSE_ROTATE = 1;
+    private static final int MOUSE_PAN = InputConstants.MOUSE_BUTTON_LEFT;
+    private static final int MOUSE_ROTATE = InputConstants.MOUSE_BUTTON_RIGHT;
 
-    private static final int KEY_W = 87;
-    private static final int KEY_A = 65;
-    private static final int KEY_S = 83;
-    private static final int KEY_D = 68;
-    private static final int KEY_Q = 81;
-    private static final int KEY_E = 69;
-    private static final int KEY_RIGHT = 262;
-    private static final int KEY_LEFT = 263;
-    private static final int KEY_DOWN = 264;
-    private static final int KEY_UP = 265;
+    private static final int KEY_W = InputConstants.KEY_W;
+    private static final int KEY_A = InputConstants.KEY_A;
+    private static final int KEY_S = InputConstants.KEY_S;
+    private static final int KEY_D = InputConstants.KEY_D;
+    private static final int KEY_Q = InputConstants.KEY_Q;
+    private static final int KEY_E = InputConstants.KEY_E;
+    private static final int KEY_RIGHT = InputConstants.KEY_RIGHT;
+    private static final int KEY_LEFT = InputConstants.KEY_LEFT;
+    private static final int KEY_DOWN = InputConstants.KEY_DOWN;
+    private static final int KEY_UP = InputConstants.KEY_UP;
 
     private boolean keyW, keyA, keyS, keyD, keyQ, keyE;
     private long lastTickNanos = 0;
