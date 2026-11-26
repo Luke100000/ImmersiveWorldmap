@@ -1,5 +1,6 @@
 package net.conczin.immersive_worldmap.util;
 
+import net.conczin.immersive_worldmap.config.Config;
 import net.conczin.immersive_worldmap.ImmersiveWorldmap;
 import net.minecraft.CrashReport;
 import net.minecraft.client.Minecraft;
@@ -19,8 +20,7 @@ public final class ThreadPoolUtil {
     }
 
     public static PriorityThreadPoolExecutor createLowPriorityFixedThreadPool(String namePrefix) {
-        int cores = Runtime.getRuntime().availableProcessors();
-        return createLowPriorityFixedThreadPool(namePrefix, Math.max(1, cores - 2));
+        return createLowPriorityFixedThreadPool(namePrefix, Config.getInstance().getWorkerThreads());
     }
 
     public static PriorityThreadPoolExecutor createLowPriorityFixedThreadPool(String namePrefix, int threads) {
