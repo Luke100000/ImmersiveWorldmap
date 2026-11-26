@@ -8,6 +8,7 @@ import net.conczin.immersive_worldmap.renderer.LodChunkMeshManager;
 import net.conczin.immersive_worldmap.renderer.LodChunkPageManager;
 import net.conczin.immersive_worldmap.renderer.LodChunkVisibilitySelector;
 import net.conczin.immersive_worldmap.renderer.MapMemoryTracker;
+import net.conczin.immersive_worldmap.config.Config;
 import net.conczin.immersive_worldmap.settings.SharedSettings;
 import net.conczin.immersive_worldmap.util.TickLruCache;
 import com.mojang.blaze3d.systems.RenderSystem;
@@ -108,7 +109,8 @@ public class LodViewerScreen extends Screen {
         SharedSettings.caveViewWallHeight = airBlocks;
 
         SharedSettings.caveView = false;
-        for (; aboveHead.getY() < minecraft.level.getMaxY(); aboveHead.move(0, 1, 0)) {
+        boolean detectCaves = Config.getInstance().isCaveViewEnabled() && Config.getInstance().autoCaveView;
+        for (; detectCaves && aboveHead.getY() < minecraft.level.getMaxY(); aboveHead.move(0, 1, 0)) {
             BlockState state = minecraft.level.getBlockState(aboveHead);
             if (state.blocksMotion() && !(state.getBlock() instanceof LeavesBlock)) {
                 SharedSettings.caveView = true;
@@ -201,7 +203,7 @@ public class LodViewerScreen extends Screen {
             }
         }
 
-        if (keyCode == GLFW.GLFW_KEY_C) {
+        if (keyCode == GLFW.GLFW_KEY_C && Config.getInstance().isCaveViewEnabled()) {
             if (heldKeys.add(keyCode)) {
                 SharedSettings.caveView = !SharedSettings.caveView;
                 clearMeshes();
@@ -260,7 +262,8 @@ public class LodViewerScreen extends Screen {
         if (openingStartNanos == 0) {
             openingStartNanos = now;
         }
-        float openingProgress = Math.min((now - openingStartNanos) / (OPENING_DURATION_SECONDS * 1_000_000_000f), 1f);
+        float openingProgress = Config.getInstance().openingAnimation
+                ? Math.min((now - openingStartNanos) / (OPENING_DURATION_SECONDS * 1_000_000_000f), 1f) : 1f;
         float openingBonus = 1f - openingProgress * openingProgress * (3f - 2f * openingProgress);
 
         camera.tick();
@@ -311,7 +314,7 @@ public class LodViewerScreen extends Screen {
 
     private void drawDebug(GuiGraphicsExtractor graphics, float yawDegrees) {
         boolean debug = minecraft.debugEntries.isOverlayVisible();
-        var controls = controls(debug);
+        List<FormattedCharSequence> controls = Config.getInstance().showControls || debug ? controls(debug) : List.of();
 
         if (debug) {
             int tasks = ChunkLodProcessor.getPendingTaskCount() + LodChunkPageManager.INSTANCE.getPendingTaskCount();
@@ -354,10 +357,13 @@ public class LodViewerScreen extends Screen {
                 .append("   ").append(Component.translatable("screen.immersive_worldmap.controls.zoom"))
                 .append("   ").append(Component.translatable("screen.immersive_worldmap.controls.pan_keys"))
                 .append("   ").append(Component.translatable("screen.immersive_worldmap.controls.rotate"))
-                .append("   ").append(Component.translatable("screen.immersive_worldmap.controls.align_view"))
-                .append("   ").append(Component.translatable("screen.immersive_worldmap.controls.cave_view"))
-                .append("   ").append(Component.translatable("screen.immersive_worldmap.controls.close",
-                        ImmersiveWorldmapClient.MAP_VIEWER_KEY.getTranslatedKeyMessage()));
+                .append("   ").append(Component.translatable("screen.immersive_worldmap.controls.align_view"));
+
+        if (Config.getInstance().isCaveViewEnabled()) {
+            controlsText.append("   ").append(Component.translatable("screen.immersive_worldmap.controls.cave_view"));
+        }
+        controlsText.append("   ").append(Component.translatable("screen.immersive_worldmap.controls.close",
+                ImmersiveWorldmapClient.MAP_VIEWER_KEY.getTranslatedKeyMessage()));
 
         if (debug) {
             controlsText.append("\n").append(Component.translatable("screen.immersive_worldmap.clear_dimension"))

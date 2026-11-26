@@ -1,5 +1,6 @@
 package net.conczin.immersive_worldmap.renderer;
 
+import net.conczin.immersive_worldmap.config.Config;
 import it.unimi.dsi.fastutil.objects.ObjectLinkedOpenHashSet;
 import it.unimi.dsi.fastutil.objects.ObjectOpenHashSet;
 import net.conczin.immersive_worldmap.lod.ChunkLodProcessor;
@@ -32,8 +33,6 @@ public class LodChunkVisibilitySelector {
 
     private static final int CHUNK_SIZE = 16;
 
-    private static final double SUBDIVIDE_DISTANCE_FACTOR = 12;
-    private static final double RENDER_DISTANCE = 48;
     private static final double LOD_HYSTERESIS = 0.05;
     private static final float POSITION_STEP = 1f / 16f;
     private static final float ANGLE_STEP = 1f / 64f;
@@ -149,7 +148,7 @@ public class LodChunkVisibilitySelector {
             selectedDimension = snapshot.dimension();
             targetLod = -1;
         }
-        double base = CHUNK_SIZE * SUBDIVIDE_DISTANCE_FACTOR;
+        double base = CHUNK_SIZE * Config.getInstance().detailDistance;
         if (targetLod < 0) {
             targetLod = 0;
             while (targetLod < LodChunkData.MAX_LOD && snapshot.zoom() >= Math.scalb(base, targetLod + 1)) {
@@ -265,7 +264,7 @@ public class LodChunkVisibilitySelector {
         double pitch = Math.toRadians(-pitchDegrees);
         float heightOffset = heightAboveTerrain / (float) Math.sin(pitch);
         float horizonOffset = heightOffset * (float) Math.cos(pitch);
-        float radius = (float) Math.ceil((zoom + heightOffset) / CHUNK_SIZE * RENDER_DISTANCE);
+        float radius = (float) Math.ceil((zoom + heightOffset) / CHUNK_SIZE * Config.getInstance().viewDistance);
         // Compensate the fixed height gap so the far fade edge keeps the same viewing angle at close zoom.
         return new RenderRange(radius * 0.75f + horizonOffset, radius + horizonOffset);
     }

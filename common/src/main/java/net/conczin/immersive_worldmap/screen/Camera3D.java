@@ -1,6 +1,7 @@
 package net.conczin.immersive_worldmap.screen;
 
 import com.mojang.blaze3d.platform.InputConstants;
+import net.conczin.immersive_worldmap.config.Config;
 import net.minecraft.util.Mth;
 
 public class Camera3D {
@@ -30,7 +31,7 @@ public class Camera3D {
     private boolean isDraggingPan = false;
     private int lastMouseX, lastMouseY;
 
-    private static final float ROT_SENSITIVITY = 0.4f; // px -> degrees
+
     private static final float WASD_SPEED = 0.01f; // fraction of zoom
     private static final float KEY_ROTATION_SPEED = 150f; // degrees per second
 
@@ -153,8 +154,8 @@ public class Camera3D {
         lastMouseY = my;
 
         if (isDraggingRotation && button == MOUSE_ROTATE) {
-            float dYaw = dx * ROT_SENSITIVITY;
-            float dPitch = dy * ROT_SENSITIVITY;
+            float dYaw = dx * Config.getInstance().rotationSensitivity;
+            float dPitch = dy * Config.getInstance().rotationSensitivity;
             targetYaw -= dYaw;
             targetPitch = Math.clamp(targetPitch - dPitch, PITCH_MIN, PITCH_MAX);
             velYaw = -dYaw;
