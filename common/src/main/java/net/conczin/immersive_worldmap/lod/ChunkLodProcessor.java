@@ -7,7 +7,7 @@ import net.conczin.immersive_worldmap.util.*;
 import net.minecraft.tags.BlockTags;
 import net.minecraft.world.level.ChunkPos;
 import net.minecraft.world.level.Level;
-import net.minecraft.world.level.block.BushBlock;
+import net.minecraft.world.level.block.VegetationBlock;
 import net.minecraft.world.level.block.state.BlockState;
 import net.minecraft.world.level.chunk.ChunkAccess;
 import net.minecraft.world.level.chunk.LevelChunk;
@@ -176,7 +176,7 @@ public class ChunkLodProcessor {
 
     // Ground foliage just adds uniform green noise, so it is dropped entirely.
     private static boolean isGroundFoliage(BlockState state) {
-        return state.is(BlockTags.REPLACEABLE) && state.getBlock() instanceof BushBlock;
+        return state.is(BlockTags.REPLACEABLE) && state.getBlock() instanceof VegetationBlock;
     }
 
     private static void processChunkSync(CacheKey key, List<PalettedContainer<BlockState>> sections, ChunkSnapshot revision) {
