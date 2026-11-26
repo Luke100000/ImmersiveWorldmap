@@ -28,7 +28,7 @@ public class ClientLevelMixin {
     private void onBlockChanged(BlockPos pos, BlockState oldState, BlockState newState, CallbackInfo ci) {
         if (!ImmersiveWorldmapClient.shouldRecordChunks()) return;
 
-        ChunkPos chunkPos = new ChunkPos(pos);
+        ChunkPos chunkPos = ChunkPos.containing(pos);
         immersiveWorldmap$dirtyChunks.putLast(chunkPos, System.nanoTime());
     }
 
@@ -47,7 +47,7 @@ public class ClientLevelMixin {
         iterator.remove();
 
         ChunkPos pos = entry.getKey();
-        LevelChunk chunk = ((ClientLevel) (Object) this).getChunkSource().getChunk(pos.x, pos.z, ChunkStatus.FULL, false);
+        LevelChunk chunk = ((ClientLevel) (Object) this).getChunkSource().getChunk(pos.x(), pos.z(), ChunkStatus.FULL, false);
         if (chunk != null) {
             ChunkLodProcessor.processChunk(chunk);
         }

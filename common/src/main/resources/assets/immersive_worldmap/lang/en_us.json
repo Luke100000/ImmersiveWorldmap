@@ -1,6 +1,6 @@
 {
   "key.immersive_worldmap.open_lod_viewer": "Open world map",
-  "category.immersive_worldmap": "Immersive Worldmap",
+  "key.category.immersive_worldmap.main": "Immersive Worldmap",
   "screen.immersive_worldmap.title": "World map",
   "screen.immersive_worldmap.controls.pan_drag": "Left drag: pan",
   "screen.immersive_worldmap.controls.orbit_drag": "Right drag: orbit",

@@ -76,7 +76,7 @@ public final class ServerChunkRecorder {
             }
             DirtyChunk dirty = entry.getKey();
             iterator.remove();
-            LevelChunk chunk = dirty.level().getChunkSource().getChunkNow(dirty.pos().x, dirty.pos().z);
+            LevelChunk chunk = dirty.level().getChunkSource().getChunkNow(dirty.pos().x(), dirty.pos().z());
             if (chunk != null) {
                 ChunkLodProcessor.processChunk(chunk, dirty.level());
             }

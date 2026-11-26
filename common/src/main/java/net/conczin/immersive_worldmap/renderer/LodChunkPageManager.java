@@ -1,30 +1,49 @@
 package net.conczin.immersive_worldmap.renderer;
 
+import com.mojang.blaze3d.buffers.GpuBuffer;
+import com.mojang.blaze3d.buffers.Std140Builder;
+import com.mojang.blaze3d.pipeline.DepthStencilState;
+import com.mojang.blaze3d.pipeline.RenderPipeline;
+import com.mojang.blaze3d.shaders.UniformType;
+import com.mojang.blaze3d.systems.GpuDevice;
+import com.mojang.blaze3d.systems.RenderPass;
 import com.mojang.blaze3d.systems.RenderSystem;
-import com.mojang.blaze3d.vertex.*;
+import com.mojang.blaze3d.textures.FilterMode;
+import com.mojang.blaze3d.textures.GpuTextureView;
+import com.mojang.blaze3d.vertex.DefaultVertexFormat;
+import com.mojang.blaze3d.vertex.VertexFormat;
 import it.unimi.dsi.fastutil.HashCommon;
 import it.unimi.dsi.fastutil.objects.ObjectLinkedOpenHashSet;
+import net.conczin.immersive_worldmap.ImmersiveWorldmap;
 import net.conczin.immersive_worldmap.screen.MapBackgroundTexture;
 import net.conczin.immersive_worldmap.util.PooledBytes;
 import net.conczin.immersive_worldmap.util.PriorityThreadPoolExecutor;
 import net.conczin.immersive_worldmap.util.ThreadPoolUtil;
 import net.minecraft.client.Minecraft;
-import net.minecraft.client.renderer.ShaderInstance;
+import net.minecraft.client.renderer.texture.DynamicTexture;
 import org.joml.Matrix4f;
-import org.lwjgl.BufferUtils;
-import org.lwjgl.PointerBuffer;
-import org.lwjgl.opengl.GL11;
-import org.lwjgl.opengl.GL32;
 import org.lwjgl.system.MemoryUtil;
 
 import java.nio.ByteBuffer;
-import java.nio.IntBuffer;
 import java.util.*;
+import java.util.OptionalDouble;
+import java.util.OptionalInt;
 import java.util.concurrent.ConcurrentHashMap;
 
 public final class LodChunkPageManager {
     public static final int PAGE_SIZE = 8;
-    public static final String SHADER_NAME = "immersive_worldmap_map";
+    public static final RenderPipeline PIPELINE = RenderPipeline.builder()
+            .withLocation(ImmersiveWorldmap.locate("pipeline/map"))
+            .withVertexShader(ImmersiveWorldmap.locate("core/immersive_worldmap_map"))
+            .withFragmentShader(ImmersiveWorldmap.locate("core/immersive_worldmap_map"))
+            .withUniform("MapInfo", UniformType.UNIFORM_BUFFER)
+            .withSampler("BackgroundTexture")
+            .withVertexFormat(DefaultVertexFormat.POSITION_COLOR, VertexFormat.Mode.QUADS)
+            .withDepthStencilState(DepthStencilState.DEFAULT)
+            .build();
+
+    // Two matrices and three vec4s, see the map shader.
+    private static final int UNIFORM_SIZE = 2 * 64 + 3 * 16;
 
     private static final int SLOTS = PAGE_SIZE * PAGE_SIZE;
     private static final int VERTEX_SIZE = DefaultVertexFormat.POSITION_COLOR.getVertexSize();
@@ -39,11 +58,7 @@ public final class LodChunkPageManager {
             ThreadPoolUtil.createLowPriorityFixedThreadPool("ImmersiveWorldmap-PageBuilder", 1);
 
     private final Matrix4f localMv = new Matrix4f();
-    private final IntBuffer counts = BufferUtils.createIntBuffer(SLOTS);
-    private final IntBuffer bases = BufferUtils.createIntBuffer(SLOTS);
 
-    // Quad indices start at zero for every mesh and only the base vertex varies.
-    private final PointerBuffer offsets = BufferUtils.createPointerBuffer(SLOTS);
     private long gpuBytes;
     private int uploadCursor;
     private volatile boolean active;
@@ -94,7 +109,8 @@ public final class LodChunkPageManager {
     }
 
     public void draw(Plan plan, Matrix4f mv, Matrix4f proj, float focusX, float focusZ,
-                     LodChunkVisibilitySelector.RenderRange range) {
+                     LodChunkVisibilitySelector.RenderRange range, int guiWidth, int guiHeight,
+                     GpuTextureView color, GpuTextureView depth) {
         if (plan == Plan.EMPTY) return;
 
         long now = System.nanoTime();
@@ -103,21 +119,68 @@ public final class LodChunkPageManager {
         }
         uploadReady(plan);
 
-        Minecraft minecraft = Minecraft.getInstance();
-        ShaderInstance shader = minecraft.gameRenderer.getShader(SHADER_NAME);
-        if (shader != null) {
-            int width = minecraft.getWindow().getGuiScaledWidth();
-            int height = minecraft.getWindow().getGuiScaledHeight();
-            int side = (int) Math.ceil(Math.hypot(width, height));
-            shader.setSampler("BackgroundTexture", minecraft.getTextureManager().getTexture(MapBackgroundTexture.get()));
-            shader.safeGetUniform("BackgroundUv").set(
-                    (float) width / side, (float) height / side,
-                    -(float) ((width - side) / 2) / side, -(float) ((height - side) / 2) / side);
-            shader.safeGetUniform("FadeStart").set(range.start());
-            shader.safeGetUniform("FadeEnd").set(range.end());
-            plan.drawPages.forEach((page, meshes) -> page.draw(meshes, mv, proj, shader, focusX, focusZ));
+        List<Map.Entry<Page, List<LodChunkMesh>>> batches = plan.drawPages.entrySet().stream()
+                .filter(entry -> entry.getKey().vertexBuffer != null && !entry.getKey().closed)
+                .toList();
+        if (!batches.isEmpty()) {
+            drawBatches(batches, mv, proj, focusX, focusZ, range, guiWidth, guiHeight, color, depth);
         }
         pruneUnusedPages(now);
+    }
+
+    private void drawBatches(List<Map.Entry<Page, List<LodChunkMesh>>> batches, Matrix4f mv, Matrix4f proj,
+                             float focusX, float focusZ, LodChunkVisibilitySelector.RenderRange range,
+                             int guiWidth, int guiHeight, GpuTextureView color, GpuTextureView depth) {
+        GpuDevice device = RenderSystem.getDevice();
+        int alignment = device.getUniformOffsetAlignment();
+        int stride = (UNIFORM_SIZE + alignment - 1) / alignment * alignment;
+
+        int side = (int) Math.ceil(Math.hypot(guiWidth, guiHeight));
+        float uvX = (float) guiWidth / side;
+        float uvY = (float) guiHeight / side;
+        float uvOffsetX = -(float) ((guiWidth - side) / 2) / side;
+        float uvOffsetY = -(float) ((guiHeight - side) / 2) / side;
+
+        ByteBuffer uniforms = MemoryUtil.memCalloc(stride * batches.size());
+        GpuBuffer uniformBuffer;
+        try {
+            for (int i = 0; i < batches.size(); i++) {
+                Page page = batches.get(i).getKey();
+                float scale = 1 << page.key.lod;
+                float originX = page.key.x * PAGE_SIZE * 16f * scale;
+                float originZ = page.key.z * PAGE_SIZE * 16f * scale;
+                localMv.set(mv).translate(originX, 0, originZ).scale(scale, scale, scale);
+                Std140Builder.intoBuffer(uniforms.slice(i * stride, UNIFORM_SIZE))
+                        .putMat4f(localMv)
+                        .putMat4f(proj)
+                        .putVec4(uvX, uvY, uvOffsetX, uvOffsetY)
+                        .putVec4(originX - focusX, originZ - focusZ, scale, 0f)
+                        .putVec4(range.start(), range.end(), color.getWidth(0), color.getHeight(0));
+            }
+            uniformBuffer = device.createBuffer(() -> "Immersive Worldmap uniforms", GpuBuffer.USAGE_UNIFORM, uniforms);
+        } finally {
+            MemoryUtil.memFree(uniforms);
+        }
+
+        try (uniformBuffer) {
+            DynamicTexture background = MapBackgroundTexture.texture();
+            int maxIndexCount = batches.stream().mapToInt(entry -> entry.getKey().uploaded.drawIndexCount).max().orElse(0);
+            RenderSystem.AutoStorageIndexBuffer indices = RenderSystem.getSequentialBuffer(VertexFormat.Mode.QUADS);
+            GpuBuffer indexBuffer = indices.getBuffer(maxIndexCount);
+
+            try (RenderPass pass = device.createCommandEncoder().createRenderPass(
+                    () -> "Immersive Worldmap", color, OptionalInt.empty(), depth, OptionalDouble.empty())) {
+                pass.setPipeline(PIPELINE);
+                pass.bindTexture("BackgroundTexture", background.getTextureView(),
+                        RenderSystem.getSamplerCache().getClampToEdge(FilterMode.NEAREST));
+                pass.setIndexBuffer(indexBuffer, indices.type());
+                for (int i = 0; i < batches.size(); i++) {
+                    Map.Entry<Page, List<LodChunkMesh>> batch = batches.get(i);
+                    pass.setUniform("MapInfo", uniformBuffer.slice((long) i * stride, UNIFORM_SIZE));
+                    batch.getKey().draw(pass, batch.getValue());
+                }
+            }
+        }
     }
 
     boolean isDrawable(LodChunkMesh mesh) {
@@ -190,20 +253,18 @@ public final class LodChunkPageManager {
         }
 
         // Multi-draw reuses quad indices from zero with a different base vertex per chunk.
-        PageData data = new PageData(snapshot, baseVertices, indexCounts, totalBytes, new MeshData.DrawState(
-                DefaultVertexFormat.POSITION_COLOR, totalBytes / VERTEX_SIZE, maxIndexCount,
-                VertexFormat.Mode.QUADS, VertexFormat.IndexType.least(maxVertexCount)));
+        PageData data = new PageData(snapshot, baseVertices, indexCounts, totalBytes, maxIndexCount);
         if (totalBytes == 0) return new PageBuild(data, null);
         assemblingBytes = totalBytes;
-        ByteBufferBuilder buffer = new ByteBufferBuilder(totalBytes);
+        ByteBuffer buffer = MemoryUtil.memAlloc(totalBytes);
         try {
-            ByteBuffer target = MemoryUtil.memByteBuffer(buffer.reserve(totalBytes), totalBytes);
+            ByteBuffer target = buffer.duplicate();
             for (PooledBytes geometry : snapshot.geometry) {
                 if (geometry != null) geometry.copyTo(target);
             }
             return new PageBuild(data, buffer);
         } catch (Throwable error) {
-            buffer.close();
+            MemoryUtil.memFree(buffer);
             throw error;
         }
     }
@@ -252,16 +313,16 @@ public final class LodChunkPageManager {
             int[] baseVertices,
             int[] indexCounts,
             int bytes,
-            MeshData.DrawState drawState
+            int drawIndexCount
     ) {
     }
 
-    private record PageBuild(PageData data, ByteBufferBuilder buffer) implements AutoCloseable {
+    private record PageBuild(PageData data, ByteBuffer buffer) implements AutoCloseable {
 
         @Override
         public void close() {
             if (buffer != null) {
-                buffer.close();
+                MemoryUtil.memFree(buffer);
             }
         }
     }
@@ -274,7 +335,7 @@ public final class LodChunkPageManager {
         boolean closed;
         volatile PageData uploaded;
         volatile PageBuild ready;
-        VertexBuffer vertexBuffer;
+        GpuBuffer vertexBuffer;
 
         Page(PageKey key) {
             this.key = key;
@@ -354,18 +415,10 @@ public final class LodChunkPageManager {
                 }
 
                 if (build.buffer != null) {
-                    if (vertexBuffer == null) {
-                        vertexBuffer = new VertexBuffer(VertexBuffer.Usage.STATIC);
-                    }
-                    try {
-                        vertexBuffer.bind();
-                        vertexBuffer.upload(new MeshData(Objects.requireNonNull(build.buffer.build()), build.data.drawState));
-                    } catch (Throwable error) {
-                        close();
-                        throw error;
-                    } finally {
-                        VertexBuffer.unbind();
-                    }
+                    GpuBuffer previous = vertexBuffer;
+                    vertexBuffer = RenderSystem.getDevice().createBuffer(
+                            () -> "Immersive Worldmap page", GpuBuffer.USAGE_VERTEX, build.buffer);
+                    if (previous != null) previous.close();
                 } else if (vertexBuffer != null) {
                     vertexBuffer.close();
                     vertexBuffer = null;
@@ -377,11 +430,8 @@ public final class LodChunkPageManager {
             return true;
         }
 
-        void draw(List<LodChunkMesh> selected, Matrix4f mv, Matrix4f proj, ShaderInstance shader, float focusX, float focusZ) {
-            if (vertexBuffer == null || closed) return;
-            counts.clear();
-            bases.clear();
-
+        void draw(RenderPass pass, List<LodChunkMesh> selected) {
+            pass.setVertexBuffer(0, vertexBuffer);
             for (LodChunkMesh chunk : selected) {
                 int slot = slot(chunk);
                 if (uploaded.snapshot.chunks[slot] != chunk) continue;
@@ -389,36 +439,8 @@ public final class LodChunkPageManager {
                 if (geometry != null && geometry.length() == 0) continue;
                 int indexCount = uploaded.indexCounts[slot];
                 if (indexCount == 0) continue;
-                counts.put(indexCount);
-                bases.put(uploaded.baseVertices[slot]);
-            }
-
-            if (counts.position() == 0) return;
-            counts.flip();
-            bases.flip();
-
-            float scale = 1 << key.lod;
-            shader.safeGetUniform("MapOffset").set(
-                    key.x * PAGE_SIZE * 16f * scale - focusX, key.z * PAGE_SIZE * 16f * scale - focusZ);
-            shader.safeGetUniform("MapScale").set(scale);
-            localMv.set(mv)
-                    .translate(key.x * PAGE_SIZE * 16f * scale, 0, key.z * PAGE_SIZE * 16f * scale)
-                    .scale(scale, scale, scale);
-
-            vertexBuffer.bind();
-
-            try {
-                RenderSystem.AutoStorageIndexBuffer indices = RenderSystem.getSequentialBuffer(VertexFormat.Mode.QUADS);
-                indices.bind(uploaded.drawState.indexCount());
-                shader.setDefaultUniforms(VertexFormat.Mode.QUADS, localMv, proj, Minecraft.getInstance().getWindow());
-                shader.apply();
-                try {
-                    GL32.glMultiDrawElementsBaseVertex(GL11.GL_TRIANGLES, counts, indices.type().asGLType, offsets, bases);
-                } finally {
-                    shader.clear();
-                }
-            } finally {
-                VertexBuffer.unbind();
+                // Quad indices start at zero for every mesh and only the base vertex varies.
+                pass.drawIndexed(uploaded.baseVertices[slot], 0, indexCount, 1);
             }
         }
 

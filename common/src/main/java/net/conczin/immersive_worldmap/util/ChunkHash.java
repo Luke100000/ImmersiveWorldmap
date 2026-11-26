@@ -7,12 +7,15 @@ import net.minecraft.network.FriendlyByteBuf;
 import net.minecraft.world.level.block.Block;
 import net.minecraft.world.level.block.state.BlockState;
 import net.minecraft.world.level.chunk.PalettedContainer;
+import net.minecraft.world.level.chunk.Strategy;
 
 import java.util.List;
 import java.util.stream.LongStream;
 
 public final class ChunkHash {
     private static final XXHash64 HASH = XXHashFactory.fastestInstance().hash64();
+
+    private static final Strategy<BlockState> STRATEGY = Strategy.createForBlockStates(Block.BLOCK_STATE_REGISTRY);
 
     private ChunkHash() {
     }
@@ -24,7 +27,7 @@ public final class ChunkHash {
             for (PalettedContainer<BlockState> section : sections) {
                 buffer.writeBoolean(section != null);
                 if (section == null) continue;
-                var packed = section.pack(Block.BLOCK_STATE_REGISTRY, PalettedContainer.Strategy.SECTION_STATES);
+                var packed = section.pack(STRATEGY);
                 buffer.writeVarInt(packed.paletteEntries().size());
                 for (BlockState state : packed.paletteEntries()) {
                     buffer.writeVarInt(Block.getId(state));

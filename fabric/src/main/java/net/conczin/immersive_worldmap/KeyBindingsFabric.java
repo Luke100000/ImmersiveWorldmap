@@ -2,11 +2,11 @@ package net.conczin.immersive_worldmap;
 
 import net.conczin.immersive_worldmap.screen.LodViewerScreen;
 import net.fabricmc.fabric.api.client.event.lifecycle.v1.ClientTickEvents;
-import net.fabricmc.fabric.api.client.keybinding.v1.KeyBindingHelper;
+import net.fabricmc.fabric.api.client.keymapping.v1.KeyMappingHelper;
 
 public class KeyBindingsFabric {
     public static void register() {
-        KeyBindingHelper.registerKeyBinding(ImmersiveWorldmapClient.MAP_VIEWER_KEY);
+        KeyMappingHelper.registerKeyMapping(ImmersiveWorldmapClient.MAP_VIEWER_KEY);
 
         ClientTickEvents.END_CLIENT_TICK.register(client -> {
             while (ImmersiveWorldmapClient.MAP_VIEWER_KEY.consumeClick()) {

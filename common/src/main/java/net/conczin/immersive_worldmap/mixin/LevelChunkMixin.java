@@ -26,7 +26,7 @@ public class LevelChunkMixin {
     }
 
     @Inject(method = "setBlockState", at = @At("RETURN"))
-    private void onBlockChanged(BlockPos pos, BlockState state, boolean isMoving, CallbackInfoReturnable<BlockState> cir) {
+    private void onBlockChanged(BlockPos pos, BlockState state, int flags, CallbackInfoReturnable<BlockState> cir) {
         LevelChunk chunk = (LevelChunk) (Object) this;
         if (cir.getReturnValue() != null && chunk.getLevel() instanceof ServerLevel level) {
             ServerChunkRecorder.markDirty(chunk, level);

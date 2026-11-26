@@ -1,6 +1,6 @@
 {
   "key.immersive_worldmap.open_lod_viewer": "世界地図を開く",
-  "category.immersive_worldmap": "Immersive Worldmap",
+  "key.category.immersive_worldmap.main": "Immersive Worldmap",
   "screen.immersive_worldmap.title": "世界地図",
   "screen.immersive_worldmap.controls.pan_drag": "右ドラッグ: 角度",
   "screen.immersive_worldmap.controls.orbit_drag": "左ドラッグ: 位置",

@@ -1,6 +1,6 @@
 package net.conczin.immersive_worldmap;
 
-import net.minecraft.resources.ResourceLocation;
+import net.minecraft.resources.Identifier;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -12,8 +12,8 @@ public class ImmersiveWorldmap {
     public static final String MOD_NAME = "Immersive Worldmap";
     public static final Logger LOGGER = LoggerFactory.getLogger(MOD_NAME);
 
-    public static ResourceLocation locate(String path) {
-        return ResourceLocation.fromNamespaceAndPath(MOD_ID, path);
+    public static Identifier locate(String path) {
+        return Identifier.fromNamespaceAndPath(MOD_ID, path);
     }
 
     public static String databaseName(String type, String identifier) {

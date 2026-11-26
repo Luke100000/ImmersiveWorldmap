@@ -19,8 +19,9 @@ import java.util.concurrent.TimeUnit;
 import java.util.function.Predicate;
 
 public final class ImmersiveWorldmapClient {
+    private static final KeyMapping.Category CATEGORY = KeyMapping.Category.register(ImmersiveWorldmap.locate("main"));
     public static final KeyMapping MAP_VIEWER_KEY = new KeyMapping(
-            "key.immersive_worldmap.open_lod_viewer", GLFW.GLFW_KEY_M, "category.immersive_worldmap");
+            "key.immersive_worldmap.open_lod_viewer", GLFW.GLFW_KEY_M, CATEGORY);
 
     private static final double RETENTION_RADIUS = 675;
 
@@ -50,7 +51,7 @@ public final class ImmersiveWorldmapClient {
             double dx = minecraft.player.getX() - closedX;
             double dz = minecraft.player.getZ() - closedZ;
             if (now - closedAt >= TimeUnit.MINUTES.toNanos(5)
-                || !minecraft.level.dimension().location().toString().equals(closedDimension)
+                || !minecraft.level.dimension().identifier().toString().equals(closedDimension)
                 || dx * dx + dz * dz > RETENTION_RADIUS * RETENTION_RADIUS) {
                 LodChunkPageManager.INSTANCE.clear();
                 LodChunkMeshManager.INSTANCE.prune(key -> false);
@@ -82,7 +83,7 @@ public final class ImmersiveWorldmapClient {
         if (minecraft.player != null && minecraft.level != null) {
             closedX = minecraft.player.getX();
             closedZ = minecraft.player.getZ();
-            closedDimension = minecraft.level.dimension().location().toString();
+            closedDimension = minecraft.level.dimension().identifier().toString();
             closedAt = System.nanoTime();
             keep = key -> key.dimension().equals(closedDimension);
         }

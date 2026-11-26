@@ -1,7 +1,5 @@
 package net.conczin.immersive_worldmap.screen;
 
-import com.mojang.blaze3d.systems.RenderSystem;
-import com.mojang.math.Axis;
 import net.conczin.immersive_worldmap.ImmersiveWorldmap;
 import net.conczin.immersive_worldmap.ImmersiveWorldmapClient;
 import net.conczin.immersive_worldmap.debug.MapDebug;
@@ -12,15 +10,21 @@ import net.conczin.immersive_worldmap.renderer.LodChunkVisibilitySelector;
 import net.conczin.immersive_worldmap.renderer.MapMemoryTracker;
 import net.conczin.immersive_worldmap.settings.SharedSettings;
 import net.conczin.immersive_worldmap.util.TickLruCache;
+import com.mojang.blaze3d.systems.RenderSystem;
 import net.minecraft.client.Minecraft;
-import net.minecraft.client.gui.GuiGraphics;
-import net.minecraft.client.gui.components.PlayerFaceRenderer;
+import net.conczin.immersive_worldmap.mixin.GuiGraphicsExtractorAccessor;
+import net.conczin.immersive_worldmap.renderer.LodMapRenderState;
+import net.minecraft.client.gui.GuiGraphicsExtractor;
+import net.minecraft.client.gui.components.PlayerFaceExtractor;
 import net.minecraft.client.gui.screens.Screen;
 import net.minecraft.client.player.AbstractClientPlayer;
-import net.minecraft.client.renderer.entity.LivingEntityRenderer;
+import net.minecraft.client.input.KeyEvent;
+import net.minecraft.client.input.MouseButtonEvent;
+import net.minecraft.client.renderer.RenderPipelines;
+import net.minecraft.client.renderer.entity.player.AvatarRenderer;
 import net.minecraft.core.BlockPos;
 import net.minecraft.network.chat.Component;
-import net.minecraft.resources.ResourceLocation;
+import net.minecraft.resources.Identifier;
 import net.minecraft.util.FormattedCharSequence;
 import net.minecraft.world.entity.player.PlayerModelPart;
 import net.minecraft.world.level.block.LeavesBlock;
@@ -30,14 +34,13 @@ import net.minecraft.world.phys.Vec3;
 import org.joml.Matrix4f;
 import org.joml.Vector4f;
 import org.lwjgl.glfw.GLFW;
-import org.lwjgl.opengl.GL11;
 
 import java.util.HashSet;
 import java.util.List;
 import java.util.Set;
 
 public class LodViewerScreen extends Screen {
-    private static final ResourceLocation PLAYER_FACING_ARROW = ImmersiveWorldmap.locate("textures/gui/player_facing_arrow.png");
+    private static final Identifier PLAYER_FACING_ARROW = ImmersiveWorldmap.locate("textures/gui/player_facing_arrow.png");
     private static final int PLAYER_MARKER_SIZE = 16;
     private static final int OVERLAY_PADDING = 4;
     private static final int MAX_CAVE_AIR_BLOCKS = 64;
@@ -89,11 +92,11 @@ public class LodViewerScreen extends Screen {
             return;
         }
 
-        dimension = minecraft.level.dimension().location().toString();
+        dimension = minecraft.level.dimension().identifier().toString();
         camera.setTarget((float) minecraft.player.getX(),
-                (float) (minecraft.player.getY() - minecraft.level.getMinBuildHeight()),
+                (float) (minecraft.player.getY() - minecraft.level.getMinY()),
                 (float) minecraft.player.getZ());
-        SharedSettings.caveViewBaselineY = (int) Math.floor(minecraft.player.getY()) - minecraft.level.getMinBuildHeight();
+        SharedSettings.caveViewBaselineY = (int) Math.floor(minecraft.player.getY()) - minecraft.level.getMinY();
 
         BlockPos.MutableBlockPos aboveHead = new BlockPos.MutableBlockPos(minecraft.player.getBlockX(),
                 (int) Math.ceil(minecraft.player.getBoundingBox().maxY), minecraft.player.getBlockZ());
@@ -105,7 +108,7 @@ public class LodViewerScreen extends Screen {
         SharedSettings.caveViewWallHeight = airBlocks;
 
         SharedSettings.caveView = false;
-        for (; aboveHead.getY() < minecraft.level.getMaxBuildHeight(); aboveHead.move(0, 1, 0)) {
+        for (; aboveHead.getY() < minecraft.level.getMaxY(); aboveHead.move(0, 1, 0)) {
             BlockState state = minecraft.level.getBlockState(aboveHead);
             if (state.blocksMotion() && !(state.getBlock() instanceof LeavesBlock)) {
                 SharedSettings.caveView = true;
@@ -115,7 +118,7 @@ public class LodViewerScreen extends Screen {
 
         surfaceY = SharedSettings.caveView ? camera.getSmoothTargetY() : Math.min(camera.getSmoothTargetY(),
                 minecraft.level.getHeight(Heightmap.Types.WORLD_SURFACE, minecraft.player.getBlockX(), minecraft.player.getBlockZ())
-                - minecraft.level.getMinBuildHeight());
+                - minecraft.level.getMinY());
 
         camera.setZoom(SharedSettings.caveView ? 150f : 200f);
         camera.snapRotation(playerFacingYaw ? -minecraft.player.getYRot() : DEFAULT_YAW, SharedSettings.caveView ? -60 : -45f);
@@ -127,27 +130,27 @@ public class LodViewerScreen extends Screen {
     }
 
     @Override
-    public boolean mouseClicked(double mouseX, double mouseY, int button) {
-        if (super.mouseClicked(mouseX, mouseY, button)) {
+    public boolean mouseClicked(MouseButtonEvent event, boolean doubleClick) {
+        if (super.mouseClicked(event, doubleClick)) {
             return true;
         }
-        return camera.mouseClicked(mouseX, mouseY, button);
+        return camera.mouseClicked(event.x(), event.y(), event.button());
     }
 
     @Override
-    public boolean mouseReleased(double mouseX, double mouseY, int button) {
-        if (camera.mouseReleased(button)) {
+    public boolean mouseReleased(MouseButtonEvent event) {
+        if (camera.mouseReleased(event.button())) {
             return true;
         }
-        return super.mouseReleased(mouseX, mouseY, button);
+        return super.mouseReleased(event);
     }
 
     @Override
-    public boolean mouseDragged(double mouseX, double mouseY, int button, double dragX, double dragY) {
-        if (camera.mouseDragged(mouseX, mouseY, button, width, height)) {
+    public boolean mouseDragged(MouseButtonEvent event, double dragX, double dragY) {
+        if (camera.mouseDragged(event.x(), event.y(), event.button(), width, height)) {
             return true;
         }
-        return super.mouseDragged(mouseX, mouseY, button, dragX, dragY);
+        return super.mouseDragged(event, dragX, dragY);
     }
 
     @Override
@@ -159,8 +162,9 @@ public class LodViewerScreen extends Screen {
     }
 
     @Override
-    public boolean keyPressed(int keyCode, int scanCode, int modifiers) {
-        if (ImmersiveWorldmapClient.MAP_VIEWER_KEY.matches(keyCode, scanCode)) {
+    public boolean keyPressed(KeyEvent event) {
+        int keyCode = event.key();
+        if (ImmersiveWorldmapClient.MAP_VIEWER_KEY.matches(event)) {
             onClose();
             return true;
         }
@@ -174,13 +178,13 @@ public class LodViewerScreen extends Screen {
 
         if (keyCode == GLFW.GLFW_KEY_F3) {
             if (heldKeys.add(keyCode)) {
-                minecraft.getDebugOverlay().toggleOverlay();
+                minecraft.debugEntries.toggleDebugOverlay();
             }
             return true;
         }
 
         // Debug-only actions, gated behind the F3 overlay.
-        if (minecraft.getDebugOverlay().showDebugScreen()) {
+        if (minecraft.debugEntries.isOverlayVisible()) {
             if (keyCode == GLFW.GLFW_KEY_F6) {
                 MapDebug.clearDimensionLods(dimension);
                 return true;
@@ -219,43 +223,38 @@ public class LodViewerScreen extends Screen {
             return true;
         }
 
-        return super.keyPressed(keyCode, scanCode, modifiers);
+        return super.keyPressed(event);
     }
 
     @Override
-    public boolean keyReleased(int keyCode, int scanCode, int modifiers) {
-        heldKeys.remove(keyCode);
+    public boolean keyReleased(KeyEvent event) {
+        heldKeys.remove(event.key());
 
-        if (camera.keyReleased(keyCode)) {
+        if (camera.keyReleased(event.key())) {
             return true;
         }
 
-        return super.keyReleased(keyCode, scanCode, modifiers);
+        return super.keyReleased(event);
     }
 
     @Override
-    public void renderBackground(GuiGraphics g, int mouseX, int mouseY, float partialTick) {
+    public void extractBackground(GuiGraphicsExtractor g, int mouseX, int mouseY, float partialTick) {
         int side = (int) Math.ceil(Math.hypot(width, height));
-        RenderSystem.depthMask(false);
-        try {
-            g.blit(MapBackgroundTexture.get(), (width - side) / 2, (height - side) / 2,
-                    side, side, 0f, 0f, MapBackgroundTexture.SIZE, MapBackgroundTexture.SIZE, MapBackgroundTexture.SIZE, MapBackgroundTexture.SIZE);
-        } finally {
-            RenderSystem.depthMask(true);
-        }
+        g.blit(MapBackgroundTexture.get(), (width - side) / 2, (height - side) / 2,
+                (width - side) / 2 + side, (height - side) / 2 + side, 0f, 1f, 0f, 1f);
     }
 
     @Override
-    public void render(GuiGraphics graphics, int mouseX, int mouseY, float partialTick) {
+    public void extractRenderState(GuiGraphicsExtractor graphics, int mouseX, int mouseY, float partialTick) {
         if (minecraft.level == null || minecraft.player == null) {
             onClose();
             return;
         }
-        if (!minecraft.level.dimension().location().toString().equals(dimension)) {
+        if (!minecraft.level.dimension().identifier().toString().equals(dimension)) {
             loadState();
             clearMeshes();
         }
-        super.render(graphics, mouseX, mouseY, partialTick);
+        super.extractRenderState(graphics, mouseX, mouseY, partialTick);
 
         long now = System.nanoTime();
         if (openingStartNanos == 0) {
@@ -286,26 +285,17 @@ public class LodViewerScreen extends Screen {
 
             mv = new Matrix4f().lookAt(eyeX, eyeY, eyeZ, targetX, targetY, targetZ, 0, 1, 0);
             proj = new Matrix4f().setPerspective((float) Math.toRadians(60.0), (float) width / height,
-                    zoom * 0.1f, Math.max(zoom * 10f, renderRange.end() * 2f));
+                    zoom * 0.1f, Math.max(zoom * 10f, renderRange.end() * 2f), RenderSystem.getDevice().isZZeroToOne());
 
             LodChunkVisibilitySelector.get().update(dimension, minecraft.level.getHeight(), targetX, targetY, targetZ,
                     yawDegrees, pitchDegrees, zoom, (float) width / height, renderRange.end());
         }
 
-        graphics.flush();
-        RenderSystem.depthMask(true);
-        RenderSystem.clear(GL11.GL_DEPTH_BUFFER_BIT, Minecraft.ON_OSX);
-        RenderSystem.enableDepthTest();
-        RenderSystem.disableBlend();
-        RenderSystem.enableCull();
-
-        LodChunkPageManager.INSTANCE.draw(LodChunkVisibilitySelector.get().selection(), mv, proj,
-                camera.getSmoothTargetX(), camera.getSmoothTargetZ(),
-                renderRange);
-
-        RenderSystem.disableCull();
-        RenderSystem.disableDepthTest();
-        RenderSystem.clear(GL11.GL_DEPTH_BUFFER_BIT, Minecraft.ON_OSX);
+        // The terrain is drawn into its own texture once the GUI is rendered, then blitted here.
+        ((GuiGraphicsExtractorAccessor) graphics).immersive_worldmap$getGuiRenderState().addPicturesInPictureState(
+                new LodMapRenderState(LodChunkVisibilitySelector.get().selection(), mv, proj,
+                        camera.getSmoothTargetX(), camera.getSmoothTargetZ(), renderRange, width, height));
+        graphics.nextStratum();
 
         renderPlayers(graphics, mv, proj);
 
@@ -319,8 +309,8 @@ public class LodViewerScreen extends Screen {
         }
     }
 
-    private void drawDebug(GuiGraphics graphics, float yawDegrees) {
-        boolean debug = minecraft.getDebugOverlay().showDebugScreen();
+    private void drawDebug(GuiGraphicsExtractor graphics, float yawDegrees) {
+        boolean debug = minecraft.debugEntries.isOverlayVisible();
         var controls = controls(debug);
 
         if (debug) {
@@ -380,16 +370,16 @@ public class LodViewerScreen extends Screen {
         return controlsLines;
     }
 
-    private void drawOverlay(GuiGraphics graphics, FormattedCharSequence text, int y) {
+    private void drawOverlay(GuiGraphicsExtractor graphics, FormattedCharSequence text, int y) {
         int x = 20;
         graphics.fill(x - OVERLAY_PADDING, y - OVERLAY_PADDING,
                 x + this.font.width(text) + OVERLAY_PADDING, y + this.font.lineHeight + OVERLAY_PADDING,
                 0x80000000);
-        graphics.drawString(this.font, text, x, y, 0xFFFFFFFF);
+        graphics.text(this.font, text, x, y, 0xFFFFFFFF);
     }
 
-    private void renderPlayers(GuiGraphics graphics, Matrix4f mv, Matrix4f proj) {
-        if (minecraft.level == null || !minecraft.level.dimension().location().toString().equals(dimension)) {
+    private void renderPlayers(GuiGraphicsExtractor graphics, Matrix4f mv, Matrix4f proj) {
+        if (minecraft.level == null || !minecraft.level.dimension().identifier().toString().equals(dimension)) {
             return;
         }
 
@@ -397,10 +387,10 @@ public class LodViewerScreen extends Screen {
         Vector4f position = new Vector4f();
         Vector4f facing = new Vector4f();
         for (AbstractClientPlayer player : minecraft.level.players()) {
-            float partialTick = minecraft.getTimer().getGameTimeDeltaPartialTick(!minecraft.level.tickRateManager().isEntityFrozen(player));
+            float partialTick = minecraft.getDeltaTracker().getGameTimeDeltaPartialTick(!minecraft.level.tickRateManager().isEntityFrozen(player));
             Vec3 worldPosition = player.getPosition(partialTick);
             position.set((float) worldPosition.x,
-                    (float) (worldPosition.y - minecraft.level.getMinBuildHeight()),
+                    (float) (worldPosition.y - minecraft.level.getMinY()),
                     (float) worldPosition.z, 1f);
             viewProjection.transform(position);
 
@@ -412,14 +402,12 @@ public class LodViewerScreen extends Screen {
 
             float x = (position.x / position.w + 1f) * width * 0.5f - PLAYER_MARKER_SIZE / 2f;
             float y = (1f - position.y / position.w) * height * 0.5f - PLAYER_MARKER_SIZE / 2f;
-            graphics.pose().pushPose();
+            graphics.pose().pushMatrix();
             try {
-                graphics.pose().translate(x, y, 0f);
+                graphics.pose().translate(x, y);
                 graphics.fill(-1, -1, PLAYER_MARKER_SIZE + 1, PLAYER_MARKER_SIZE + 1, 0xFF000000);
-                graphics.flush();
-                RenderSystem.disableDepthTest();
-                PlayerFaceRenderer.draw(graphics, player.getSkin().texture(), 0, 0, PLAYER_MARKER_SIZE,
-                        player.isModelPartShown(PlayerModelPart.HAT), LivingEntityRenderer.isEntityUpsideDown(player));
+                PlayerFaceExtractor.extractRenderState(graphics, player.getSkin().body().texturePath(), 0, 0, PLAYER_MARKER_SIZE,
+                        player.isModelPartShown(PlayerModelPart.HAT), AvatarRenderer.isPlayerUpsideDown(player), -1);
 
                 // Projected pointing arrow thingy
                 float playerYaw = (float) Math.toRadians(player.getViewYRot(partialTick));
@@ -429,12 +417,12 @@ public class LodViewerScreen extends Screen {
                 float directionY = -(facing.y * position.w - position.y * facing.w) * height;
                 drawPlayerFacingArrow(graphics, directionX, directionY);
             } finally {
-                graphics.pose().popPose();
+                graphics.pose().popMatrix();
             }
         }
     }
 
-    private void drawPlayerFacingArrow(GuiGraphics graphics, float directionX, float directionY) {
+    private void drawPlayerFacingArrow(GuiGraphicsExtractor graphics, float directionX, float directionY) {
         float length = (float) Math.hypot(directionX, directionY);
         if (length == 0f) return;
         directionX /= length;
@@ -442,11 +430,11 @@ public class LodViewerScreen extends Screen {
 
         float center = PLAYER_MARKER_SIZE / 2f;
         float offset = center + 7f;
-        graphics.pose().pushPose();
-        graphics.pose().translate(center + directionX * offset, center + directionY * offset, 0f);
-        graphics.pose().mulPose(Axis.ZP.rotation((float) Math.atan2(directionX, -directionY)));
-        graphics.blit(PLAYER_FACING_ARROW, -4, -3, 0f, 0f, 9, 6, 9, 6);
-        graphics.pose().popPose();
+        graphics.pose().pushMatrix();
+        graphics.pose().translate(center + directionX * offset, center + directionY * offset);
+        graphics.pose().rotate((float) Math.atan2(directionX, -directionY));
+        graphics.blit(RenderPipelines.GUI_TEXTURED, PLAYER_FACING_ARROW, -4, -3, 0f, 0f, 9, 6, 9, 6);
+        graphics.pose().popMatrix();
     }
 
     @Override

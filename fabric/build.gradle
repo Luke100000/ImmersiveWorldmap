@@ -1,6 +1,6 @@
 plugins {
     id 'multiloader-loader'
-    id 'fabric-loom'
+    id 'net.fabricmc.fabric-loom'
 }
 
 repositories {
@@ -12,17 +12,12 @@ repositories {
 
 dependencies {
     minecraft "com.mojang:minecraft:${minecraft_version}"
-    mappings loom.layered {
-        officialMojangMappings()
-        parchment("org.parchmentmc.data:parchment-${parchment_minecraft}:${parchment_version}@zip")
-    }
-    modImplementation "net.fabricmc:fabric-loader:${fabric_loader_version}"
-    modImplementation "net.fabricmc.fabric-api:fabric-api:${fabric_version}"
+    implementation "net.fabricmc:fabric-loader:${fabric_loader_version}"
+    implementation "net.fabricmc.fabric-api:fabric-api:${fabric_version}"
 
-    modLocalRuntime "maven.modrinth:sodium:${sodium_version}"
-    modLocalRuntime "maven.modrinth:iris:${iris_version}"
-    modLocalRuntime "maven.modrinth:indium:${indium_version}"
-    modLocalRuntime "maven.modrinth:chunky:${chunky_fabric_version}"
+    localRuntime "maven.modrinth:sodium:${sodium_version}"
+    localRuntime "maven.modrinth:iris:${iris_version}"
+    localRuntime "maven.modrinth:chunky:${chunky_fabric_version}"
 
     include(implementation("org.xerial:sqlite-jdbc:3.51.3.0"))
 }
@@ -31,9 +26,6 @@ loom {
     def aw = project(':common').file("src/main/resources/${mod_id}.accesswidener")
     if (aw.exists()) {
         accessWidenerPath.set(aw)
-    }
-    mixin {
-        defaultRefmapName.set("${mod_id}.refmap.json")
     }
     runs {
         client {

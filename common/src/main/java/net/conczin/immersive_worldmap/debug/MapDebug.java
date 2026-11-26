@@ -57,7 +57,7 @@ public final class MapDebug {
 
         reprocessing = true;
         var database = DatabaseManager.getInstance();
-        String dimension = level.dimension().location().toString();
+        String dimension = level.dimension().identifier().toString();
         Path regionFolder = DimensionType.getStorageFolder(level.dimension(), server.getWorldPath(LevelResource.ROOT)).resolve("region");
         Thread worker = new Thread(() -> {
             ImmersiveWorldmap.LOGGER.info("Started chunk reprocessing!");
@@ -65,8 +65,8 @@ public final class MapDebug {
             int queued = 0;
             try {
                 database.invalidateChunkHashes(dimension);
-                var codec = PalettedContainer.codecRW(Block.BLOCK_STATE_REGISTRY, BlockState.CODEC,
-                        PalettedContainer.Strategy.SECTION_STATES, Blocks.AIR.defaultBlockState());
+                var codec = PalettedContainer.codecRW(BlockState.CODEC,
+                        level.palettedContainerFactory().blockStatesStrategy(), Blocks.AIR.defaultBlockState());
                 if (!Files.isDirectory(regionFolder)) return;
 
                 try (var files = Files.list(regionFolder)) {
@@ -86,24 +86,24 @@ public final class MapDebug {
 
                                 var pos = new ChunkPos(regionX * 32 + index % 32, regionZ * 32 + index / 32);
                                 CompoundTag tag = level.getChunkSource().chunkMap.read(pos).join().orElse(null);
-                                if (tag == null || ChunkStatus.byName(tag.getString("Status")) != ChunkStatus.FULL)
+                                if (tag == null || ChunkStatus.byName(tag.getStringOr("Status", "")) != ChunkStatus.FULL)
                                     continue;
 
                                 var sections = new ArrayList<PalettedContainer<BlockState>>(Collections.nCopies(level.getSectionsCount(), null));
-                                var savedSections = tag.getList("sections", 10);
+                                var savedSections = tag.getListOrEmpty("sections");
                                 for (int i = 0; i < savedSections.size(); i++) {
-                                    CompoundTag section = savedSections.getCompound(i);
-                                    int sectionIndex = level.getSectionIndexFromSectionY(section.getByte("Y"));
-                                    if (sectionIndex < 0 || sectionIndex >= sections.size() || !section.contains("block_states", 10))
+                                    CompoundTag section = savedSections.getCompoundOrEmpty(i);
+                                    int sectionIndex = level.getSectionIndexFromSectionY(section.getByteOr("Y", (byte) 0));
+                                    if (sectionIndex < 0 || sectionIndex >= sections.size() || !section.contains("block_states"))
                                         continue;
 
-                                    sections.set(sectionIndex, codec.parse(NbtOps.INSTANCE, section.getCompound("block_states")).getOrThrow());
+                                    sections.set(sectionIndex, codec.parse(NbtOps.INSTANCE, section.getCompoundOrEmpty("block_states")).getOrThrow());
                                 }
 
                                 if (server.isStopped() || executor.isShutdown() || ChunkLodProcessor.EXECUTOR != executor) {
                                     return;
                                 }
-                                ChunkLodProcessor.processChunk(new ChunkLodProcessor.CacheKey(pos.x, pos.z, dimension, 0), sections, Integer.MAX_VALUE);
+                                ChunkLodProcessor.processChunk(new ChunkLodProcessor.CacheKey(pos.x(), pos.z(), dimension, 0), sections, Integer.MAX_VALUE);
                                 queued++;
                             }
                         } catch (EOFException e) {

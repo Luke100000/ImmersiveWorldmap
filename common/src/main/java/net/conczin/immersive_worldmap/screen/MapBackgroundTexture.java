@@ -1,27 +1,33 @@
 package net.conczin.immersive_worldmap.screen;
 
 import com.mojang.blaze3d.platform.NativeImage;
+import net.conczin.immersive_worldmap.ImmersiveWorldmap;
 import net.minecraft.client.Minecraft;
 import net.minecraft.client.renderer.texture.DynamicTexture;
-import net.minecraft.resources.ResourceLocation;
+import net.minecraft.resources.Identifier;
 
 public final class MapBackgroundTexture {
     public static final int SIZE = 1024;
-    private static final String NAME = "immersive_worldmap/background";
+    private static final Identifier LOCATION = ImmersiveWorldmap.locate("background");
 
-    private static ResourceLocation location;
+    private static DynamicTexture texture;
 
     private MapBackgroundTexture() {
     }
 
-    public static ResourceLocation get() {
-        if (location == null) {
-            location = create();
-        }
-        return location;
+    public static Identifier get() {
+        texture();
+        return LOCATION;
     }
 
-    private static ResourceLocation create() {
+    public static DynamicTexture texture() {
+        if (texture == null) {
+            texture = create();
+        }
+        return texture;
+    }
+
+    private static DynamicTexture create() {
         NativeImage pixels = new NativeImage(SIZE, SIZE, false);
         double half = SIZE / 2.0;
         for (int y = 0; y < SIZE; y++) {
@@ -40,12 +46,12 @@ public final class MapBackgroundTexture {
                 int r = Math.clamp((int) Math.round(59 - 43 * falloff + dither), 0, 255);
                 int g = Math.clamp((int) Math.round(60 - 38 * falloff + dither), 0, 255);
                 int b = Math.clamp((int) Math.round(60 - 33 * falloff + dither), 0, 255);
-                pixels.setPixelRGBA(x, y, 0xFF000000 | (b << 16) | (g << 8) | r);
+                pixels.setPixelABGR(x, y, 0xFF000000 | (b << 16) | (g << 8) | r);
             }
         }
 
-        DynamicTexture texture = new DynamicTexture(pixels);
-        texture.setFilter(false, false);
-        return Minecraft.getInstance().getTextureManager().register(NAME, texture);
+        DynamicTexture texture = new DynamicTexture(() -> "immersive_worldmap background", pixels);
+        Minecraft.getInstance().getTextureManager().register(LOCATION, texture);
+        return texture;
     }
 }

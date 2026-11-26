@@ -9,7 +9,7 @@ public class ColorManager {
         for (int id = 0; id < 64; id++) {
             MapColor mapColor = MapColor.byId(id);
 
-            int packedColor = mapColor.calculateRGBColor(MapColor.Brightness.NORMAL);
+            int packedColor = mapColor.calculateARGBColor(MapColor.Brightness.NORMAL);
             int red = packedColor & 0xFF;
             int green = (packedColor >> 8) & 0xFF;
             int blue = (packedColor >> 16) & 0xFF;

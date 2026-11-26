@@ -122,7 +122,7 @@ public class ChunkLodProcessor {
     private static void processChunk(ChunkAccess chunk, Level level, int priority) {
         if (EXECUTOR == null || EXECUTOR.isShutdown() || !DatabaseManager.isInitialized()) return;
 
-        CacheKey key = new CacheKey(chunk.getPos().x, chunk.getPos().z, level.dimension().location().toString(), 0);
+        CacheKey key = new CacheKey(chunk.getPos().x(), chunk.getPos().z(), level.dimension().identifier().toString(), 0);
 
         // Copy palettes on the owning thread.
         List<PalettedContainer<BlockState>> sections = Arrays.stream(chunk.getSections())
@@ -171,7 +171,7 @@ public class ChunkLodProcessor {
 
     // Flowers are worth keeping, so their color is inlined into the surface below instead of a voxel.
     private static boolean isFlower(BlockState state) {
-        return state.is(BlockTags.SMALL_FLOWERS) || state.is(BlockTags.TALL_FLOWERS);
+        return state.is(BlockTags.FLOWERS);
     }
 
     // Ground foliage just adds uniform green noise, so it is dropped entirely.
@@ -376,7 +376,7 @@ public class ChunkLodProcessor {
                 for (int x = 0; x < 8; x++) {
                     for (int z = 0; z < 8; z++) {
                         // Sample coverage horizontally, but retain thin surface layers vertically.
-                        long position = ChunkPos.asLong(src.chunkX() * 8 + x, src.chunkZ() * 8 + z);
+                        long position = ChunkPos.pack(src.chunkX() * 8 + x, src.chunkZ() * 8 + z);
                         int sample = (int) HashCommon.murmurHash3(position + src.lodLevel()) & 3;
                         int sx = x * 2 + (sample >> 1);
                         int sz = z * 2 + (sample & 1);
