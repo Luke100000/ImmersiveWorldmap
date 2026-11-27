@@ -55,7 +55,6 @@ jobs:
           environment: client
           game-versions: |
             ${{steps.split.outputs._1}}
-            1.21.1
           java: |
             Java 21
           dependencies: |
@@ -80,7 +79,6 @@ jobs:
           environment: client
           game-versions: |
             ${{steps.split.outputs._1}}
-            1.21.1
           java: |
             Java 21
 
